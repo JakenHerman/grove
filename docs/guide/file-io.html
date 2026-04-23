@@ -93,6 +93,60 @@ End
         grove.
       </p>
 
+      <h3>Reading LP files</h3>
+
+      <p>
+        <code>grove.ReadLP</code> is the inverse of
+        <code>WriteLP</code>: any model you write with <code>WriteLP</code>
+        and read back with <code>ReadLP</code> is structurally
+        equivalent to the original — same sense, same variable
+        kinds/bounds, same objective and constraint coefficients.
+      </p>
+
+<pre><code class="language-go">f, err := os.Open("nurses.lp")
+if err != nil {
+    return err
+}
+defer f.Close()
+
+prob, err := grove.ReadLP(f)
+if err != nil {
+    return err // parse errors carry the offending line and column
+}
+
+res, err := prob.Solve()
+</code></pre>
+
+      <p>
+        The reader accepts the usual CPLEX-LP tolerances: case-insensitive
+        keywords, abbreviated section headers (<code>Min</code>/<code>Max</code>,
+        <code>s.t.</code>/<code>st</code>/<code>such that</code>,
+        <code>Bound</code>, <code>Gen</code>/<code>Integer</code>/<code>Integers</code>,
+        <code>Bin</code>/<code>Binaries</code>), expressions that span
+        multiple lines, backslash comments, and blank lines anywhere.
+        Variables that appear only in the objective or constraints —
+        without an explicit <code>Bounds</code> row — default to
+        <code>[0, +Inf]</code> continuous, matching the CPLEX default.
+      </p>
+
+      <p>
+        Parse errors are <code>*grove.parseError</code> values whose
+        <code>Error()</code> includes the 1-based line (and column when
+        available) so mistakes surface with a useful pointer into the
+        file:
+      </p>
+
+<pre><code>grove: LP parse error at line 5, column 11: expected '+' or '-' between terms
+</code></pre>
+
+      <p>
+        The reader does not yet model SOS sets (they are silently
+        skipped) or <em>range constraints</em> of the form
+        <code>3 &lt;= expr &lt;= 10</code> — the latter surface a clear
+        diagnostic. If you need ranges today, split them into two
+        separate constraints.
+      </p>
+
       <h2>MPS format</h2>
 
       <p>
@@ -124,10 +178,10 @@ if err := prob.WriteMPS(f); err != nil {
       <div class="callout">
         <span class="callout-label">roadmap</span>
         <p>
-          MPS and LP <em>readers</em> land in v0.2, which will close
-          the round-trip. v0.1 ships only the writers because the
-          immediate use-case is &ldquo;hand my model to CBC or
-          HiGHS&rdquo;.
+          The CPLEX-LP reader (<code>ReadLP</code>) shipped in v0.2 and
+          is documented above. The MPS reader is the next v0.2 item —
+          until it lands, models authored in MPS need a detour through
+          an LP converter.
         </p>
       </div>
 

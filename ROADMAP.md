@@ -39,8 +39,8 @@ Target: **Q3.** Backwards-compatible additions only. Epic: [#24](https://github.
 
 - **Reading** `.lp` and `.mps` files (writers ship in v0.1; readers come
   next so models can flow in from MIPLIB benchmarks).
-  ([#1](https://github.com/JakenHerman/grove/issues/1) CPLEX LP ·
-  [#2](https://github.com/JakenHerman/grove/issues/2) MPS)
+  - [x] [#1](https://github.com/JakenHerman/grove/issues/1) CPLEX LP
+  - [ ] [#2](https://github.com/JakenHerman/grove/issues/2) MPS
 - Range information for sensitivity: per-coefficient and per-RHS ranges
   over which the current basis stays optimal (Bertsimas & Tsitsiklis §5.2).
   ([#3](https://github.com/JakenHerman/grove/issues/3))
