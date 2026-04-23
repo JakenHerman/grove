@@ -107,8 +107,16 @@ func TestValidateBoundsInverted(t *testing.T) {
 	x := p.NewVar("x", Continuous, Bounds(5, 1))
 	p.SetObjective(Expr{x: 1})
 	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
-	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "empty domain") {
-		t.Fatalf("err=%v", err)
+	errs := p.Validate()
+	if len(errs) == 0 {
+		t.Fatal("expected inverted-bounds error")
+	}
+	ve := validationErrorForKind(errs, ValidationInvertedBounds)
+	if ve == nil {
+		t.Fatalf("errs=%v want ValidationInvertedBounds", errs)
+	}
+	if !strings.Contains(ve.Message, "empty domain") {
+		t.Fatalf("message=%q", ve.Message)
 	}
 }
 
@@ -117,8 +125,170 @@ func TestValidateNaNCoefficient(t *testing.T) {
 	x := p.NewVar("x", Continuous)
 	p.SetObjective(Expr{x: 1})
 	p.AddConstraint("c", Expr{x: math.NaN()}, GTE, 0)
-	if err := p.Validate(); err == nil {
+	errs := p.Validate()
+	if len(errs) == 0 {
 		t.Fatal("expected NaN error")
+	}
+	if !hasValidationKind(errs, ValidationBadCoefficient) {
+		t.Fatalf("errs=%v want ValidationBadCoefficient", errs)
+	}
+	if hasValidationKind(errs, ValidationZeroRow) {
+		t.Fatalf("did not want ValidationZeroRow when row has only non-finite coefs: %v", errs)
+	}
+}
+
+// hasValidationKind reports whether errs contains a *ValidationError
+// with the given Kind.
+func hasValidationKind(errs []error, k ValidationErrorKind) bool {
+	return validationErrorForKind(errs, k) != nil
+}
+
+// validationErrorForKind returns the first *ValidationError in errs with
+// the given Kind, or nil.
+func validationErrorForKind(errs []error, k ValidationErrorKind) *ValidationError {
+	for _, err := range errs {
+		var ve *ValidationError
+		if errors.As(err, &ve) && ve.Kind == k {
+			return ve
+		}
+	}
+	return nil
+}
+
+func TestValidateDuplicateConstraintName(t *testing.T) {
+	// AddConstraint panics on duplicates, so simulate the scenario a
+	// file reader or direct slice manipulation could hit.
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	p.SetObjective(Expr{x: 1})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	// Manually append a second constraint named "c" to bypass the
+	// registration-time panic.
+	p.constraints = append(p.constraints, &Constraint{
+		name:  "c",
+		expr:  Expr{x: 1},
+		ctype: LTE,
+		rhs:   5,
+		idx:   len(p.constraints),
+	})
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationDuplicateConstraint) {
+		t.Fatalf("errs=%v want ValidationDuplicateConstraint", errs)
+	}
+}
+
+func TestValidateEmptyRow(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	p.SetObjective(Expr{x: 1})
+	p.AddConstraint("empty", Expr{}, LTE, 0)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationEmptyRow) {
+		t.Fatalf("errs=%v want ValidationEmptyRow", errs)
+	}
+}
+
+func TestValidateZeroRow(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	y := p.NewVar("y", Continuous)
+	p.SetObjective(Expr{x: 1})
+	p.AddConstraint("zero", Expr{x: 0, y: 0}, LTE, 0)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationZeroRow) {
+		t.Fatalf("errs=%v want ValidationZeroRow", errs)
+	}
+}
+
+func TestValidateZeroObjective(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	y := p.NewVar("y", Continuous)
+	p.SetObjective(Expr{x: 0, y: 0})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationZeroObjective) {
+		t.Fatalf("errs=%v want ValidationZeroObjective", errs)
+	}
+}
+
+func TestValidateNaNObjectiveCoefficient(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	p.SetObjective(Expr{x: math.NaN()})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationBadObjectiveCoef) {
+		t.Fatalf("errs=%v want ValidationBadObjectiveCoef", errs)
+	}
+}
+
+func TestValidateInfObjectiveCoefficient(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	p.SetObjective(Expr{x: math.Inf(1)})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationBadObjectiveCoef) {
+		t.Fatalf("errs=%v want ValidationBadObjectiveCoef", errs)
+	}
+}
+
+func TestValidateObjectiveNonFiniteOnlyNoZeroObjective(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	y := p.NewVar("y", Continuous)
+	p.SetObjective(Expr{x: math.NaN(), y: math.Inf(1)})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	errs := p.Validate()
+	if hasValidationKind(errs, ValidationZeroObjective) {
+		t.Fatalf("did not want ValidationZeroObjective alongside only non-finite objective coefs: %v", errs)
+	}
+	if !hasValidationKind(errs, ValidationBadObjectiveCoef) {
+		t.Fatalf("errs=%v want ValidationBadObjectiveCoef", errs)
+	}
+}
+
+func TestValidateInfCoefficient(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	p.SetObjective(Expr{x: 1})
+	p.AddConstraint("c", Expr{x: math.Inf(-1)}, LTE, 1)
+	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationBadCoefficient) {
+		t.Fatalf("errs=%v want ValidationBadCoefficient", errs)
+	}
+}
+
+// TestValidateCollectsAllErrors confirms Validate never short-circuits:
+// a pathological problem should yield at least four independent errors
+// from a single call.
+func TestValidateCollectsAllErrors(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	// Inverted bounds on x.
+	x := p.NewVar("x", Continuous, Bounds(5, 1))
+	// All-zero objective.
+	p.SetObjective(Expr{x: 0})
+	// Empty-row constraint.
+	p.AddConstraint("empty", Expr{}, LTE, 0)
+	// NaN coefficient.
+	p.AddConstraint("nan", Expr{x: math.NaN()}, LTE, 0)
+	// Duplicate constraint name (manually).
+	p.constraints = append(p.constraints, &Constraint{
+		name: "empty", expr: Expr{x: 1}, ctype: LTE, rhs: 0,
+		idx: len(p.constraints),
+	})
+	errs := p.Validate()
+	for _, want := range []ValidationErrorKind{
+		ValidationInvertedBounds,
+		ValidationZeroObjective,
+		ValidationEmptyRow,
+		ValidationBadCoefficient,
+		ValidationDuplicateConstraint,
+	} {
+		if !hasValidationKind(errs, want) {
+			t.Errorf("missing %s in %v", want, errs)
+		}
 	}
 }
 

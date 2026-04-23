@@ -50,7 +50,7 @@ Target: **Q3.** Backwards-compatible additions only. Epic: [#24](https://github.
 - [x] Presolve pass that drops empty rows/columns and detects fixed
   variables before the simplex starts.
   ([#5](https://github.com/JakenHerman/grove/issues/5))
-- Constraint validation upgrades: detect duplicates, empty rows,
+- [x] Constraint validation upgrades: detect duplicates, empty rows,
   zero-only objectives, NaN/Inf coefficients.
   ([#6](https://github.com/JakenHerman/grove/issues/6))
 

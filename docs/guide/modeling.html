@@ -244,22 +244,113 @@ fmt.Println(res.Dual(budget)) // ∂z*/∂rhs of `budget`
       <h2>Validation</h2>
 
       <p>
-        <code>Validate</code> runs automatically at the top of
+        <code>Problem.Validate</code> runs automatically at the top of
         <code>Solve</code>, but you can call it yourself earlier if
-        you&rsquo;re building a model in pieces:
+        you&rsquo;re building a model in pieces. It returns
+        <code>[]error</code> with <em>every</em> problem found — it
+        never short-circuits on the first failure, so a single call
+        surfaces the whole class of issues at once:
       </p>
 
-<pre><code class="language-go">if err := prob.Validate(); err != nil {
-    return fmt.Errorf("bad model: %w", err)
+<pre><code class="language-go">if errs := prob.Validate(); len(errs) &gt; 0 {
+    for _, err := range errs {
+        log.Println("bad model:", err)
+    }
+    return errors.Join(errs...)
 }
 </code></pre>
 
       <p>
-        The checks it performs today: non-empty variable and
-        constraint lists, unique names, no inverted bounds
-        (<code>low &gt; high</code>), a non-nil objective, and no
-        dangling <code>*Var</code>s that belong to a different
-        <code>Problem</code>.
+        The full list of checks:
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Kind</th><th>What it catches</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ValidationNoVariables</code></td>
+            <td>The problem has no variables at all.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationNoObjective</code></td>
+            <td><code>SetObjective</code> was never called (the objective map is empty).</td>
+          </tr>
+          <tr>
+            <td><code>ValidationZeroObjective</code></td>
+            <td>
+              Every objective coefficient is finite and zero. If any
+              coefficient is NaN or ±Inf, only
+              <code>ValidationBadObjectiveCoef</code> is reported for
+              those terms. grove treats an all-finite-zero objective as
+              a modeling mistake — add a non-zero coefficient on at
+              least one variable, or (for user-built models) drop the
+              objective call entirely and hit <code>ValidationNoObjective</code>.
+              Presolve-reduced problems may legally have an empty objective
+              map when the linear part was folded into
+              <code>SetObjectiveConstant</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>ValidationBadBound</code></td>
+            <td>A variable has a NaN bound. <code>±Inf</code> is still valid — that&rsquo;s the sentinel for an unbounded side.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationInvertedBounds</code></td>
+            <td><code>low &gt; high</code> on <code>Bounds</code>, which would leave the variable&rsquo;s domain empty.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationBadObjectiveCoef</code></td>
+            <td>The objective has a NaN or <code>±Inf</code> coefficient.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationBadRHS</code></td>
+            <td>A constraint has a NaN or <code>±Inf</code> right-hand side.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationEmptyRow</code></td>
+            <td>A constraint&rsquo;s LHS is the empty expression <code>Expr{}</code>.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationZeroRow</code></td>
+            <td>A constraint has a non-empty LHS and every coefficient is finite and zero (<code>Expr{x: 0, y: 0}</code>). Rows with any NaN/±Inf coefficient only report <code>ValidationBadCoefficient</code>, not <code>ValidationZeroRow</code>. These would be dropped by presolve anyway; rejecting up front surfaces the likely modeling typo.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationBadCoefficient</code></td>
+            <td>A constraint has a NaN or <code>±Inf</code> coefficient on one of its variables.</td>
+          </tr>
+          <tr>
+            <td><code>ValidationDuplicateConstraint</code></td>
+            <td>Two or more constraints share the same name. (<code>AddConstraint</code> panics on duplicates at registration time; <code>Validate</code> is the backstop for direct-slice construction and file readers.)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        Each entry in the returned slice is a <code>*ValidationError</code>
+        with a stable <code>Kind</code> field — handy when tooling wants
+        to react to a specific class of issue rather than grepping
+        strings:
+      </p>
+
+<pre><code class="language-go">var verr *grove.ValidationError
+for _, err := range prob.Validate() {
+    if errors.As(err, &amp;verr) &amp;&amp; verr.Kind == grove.ValidationDuplicateConstraint {
+        fixDuplicateName(verr.Target)
+    }
+}
+</code></pre>
+
+      <p>
+        Both <code>NewVar</code> and <code>AddConstraint</code> still
+        panic on duplicate names at registration time; <code>Validate</code>
+        exists to catch the same class of problem when a model is built
+        any other way — a file reader, code inside the
+        <code>grove</code> package that appends to the internal
+        constraint slice, or a test that mutates the live slice returned
+        by <code>Constraints()</code> (the backing array is shared; treat
+        it as read-only unless you know what you&rsquo;re doing).
       </p>
 
       <h2>Putting it together</h2>
