@@ -490,6 +490,59 @@ func TestReadLPMissingSenseHeader(t *testing.T) {
 	}
 }
 
+func TestReadLPRangeConstraintDiagnostic(t *testing.T) {
+	// Classic range form: constant LHS, variables in the middle.
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			"low <= expr <= high",
+			"Minimize\n obj: x + y\nSubject To\n c1: 3 <= x + y <= 10\nEnd\n",
+		},
+		{
+			"high >= expr >= low",
+			"Minimize\n obj: x + y\nSubject To\n c1: 10 >= x + y >= 3\nEnd\n",
+		},
+		{
+			"expr <= rhs <= higher (mirror form)",
+			"Minimize\n obj: x + y\nSubject To\n c1: x + y <= 10 <= 20\nEnd\n",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := ReadLP(strings.NewReader(c.src))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "range constraints") {
+				t.Errorf("error should mention range constraints, got: %v", err)
+			}
+			pe, ok := err.(*parseError)
+			if !ok || pe.Line == 0 {
+				t.Errorf("error should carry a line number: %v", err)
+			}
+		})
+	}
+}
+
+func TestReadLPConstantOnlyLHSDiagnostic(t *testing.T) {
+	// Not a range — just a malformed constraint with no variables on
+	// the left. The diagnostic should point at that, not at range
+	// constraints.
+	src := "Minimize\n obj: x\nSubject To\n c1: 3 <= 5\nEnd\n"
+	_, err := ReadLP(strings.NewReader(src))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "at least one variable") {
+		t.Errorf("diagnostic should call out missing variable; got: %v", err)
+	}
+	if strings.Contains(err.Error(), "range constraints") {
+		t.Errorf("should not mislabel as range constraint: %v", err)
+	}
+}
+
 func TestReadLPDuplicateConstraintName(t *testing.T) {
 	src := `Minimize
  obj: x

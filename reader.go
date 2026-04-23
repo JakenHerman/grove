@@ -650,17 +650,37 @@ func (b *builder) parseConstraints(sec section) error {
 			return errAt(opTok.line, opTok.col, "expected '<=', '>=', or '=' in constraint %q", name)
 		}
 
+		// Range constraints ("low <= expr <= high" or the mirror form
+		// "high >= expr >= low") are not modeled by grove today. Detect
+		// them up front — otherwise a constant LHS lands us in
+		// parseSignedNumber below, which would report a misleading
+		// "expected number" error against the first variable of the
+		// middle expression.
+		if len(expr) == 0 && (ctype == LTE || ctype == GTE) {
+			midExpr, _, merr := p.parseExprAndConst(b)
+			if merr != nil {
+				return errAt(opTok.line, opTok.col,
+					"constraint %q: left-hand side must include at least one variable", name)
+			}
+			if tail, _ := p.peek(); len(midExpr) > 0 && (tail.typ == tokLE || tail.typ == tokGE) {
+				return errAt(opTok.line, opTok.col,
+					"range constraints (low <= expr <= high) are not supported in constraint %q", name)
+			}
+			return errAt(opTok.line, opTok.col,
+				"constraint %q: left-hand side must include at least one variable", name)
+		}
+
 		rhs, err := p.parseSignedNumber()
 		if err != nil {
 			return err
 		}
 
-		// Range constraints ("3 <= expr <= 10") are not modeled by grove
-		// today — surface a clear diagnostic rather than silently drop
-		// the second half.
+		// Also catch the unusual mirror form "expr <= rhs <= higher"
+		// where the LHS does carry variables.
 		if tNext, err := p.peek(); err == nil {
 			if tNext.typ == tokLE || tNext.typ == tokGE {
-				return errAt(tNext.line, tNext.col, "range constraints are not supported in constraint %q", name)
+				return errAt(tNext.line, tNext.col,
+					"range constraints (low <= expr <= high) are not supported in constraint %q", name)
 			}
 		}
 
