@@ -505,26 +505,34 @@ func (p *Problem) Solve() (*Result, error) {
 	// Presolve runs by default; SkipPresolve = true bypasses it.
 	target := p
 	var undo *PresolveUndo
+	var res *Result
+	var err error
 	if !p.SkipPresolve {
-		rp, u, err := p.Presolve(nil)
-		if err != nil {
-			return &Result{Status: NotSolved, Message: err.Error()}, err
+		rp, u, perr := p.Presolve(nil)
+		if perr != nil {
+			return &Result{Status: NotSolved, Message: perr.Error()}, perr
 		}
 		undo = u
 		if u.Terminal != NotSolved {
-			res := u.terminalResult()
-			return res, nil
+			// Presolve decided the problem's status on its own; build
+			// the expanded Result from the undo map and fall through to
+			// the shared post-solve section so checks like the ILP
+			// warning apply uniformly.
+			res = u.terminalResult()
+		} else {
+			target = rp
 		}
-		target = rp
 	}
 
-	solver := p.Solver
-	if solver == nil {
-		solver = &SimplexSolver{Verbose: p.Verbose, MaxIterations: p.MaxIterations}
-	}
-	res, err := solver.Solve(target)
-	if undo != nil {
-		res = undo.expand(res)
+	if res == nil {
+		solver := p.Solver
+		if solver == nil {
+			solver = &SimplexSolver{Verbose: p.Verbose, MaxIterations: p.MaxIterations}
+		}
+		res, err = solver.Solve(target)
+		if undo != nil {
+			res = undo.expand(res)
+		}
 	}
 	if res != nil && res.Status == Optimal {
 		if off := res.NonIntegerIntegerVars(p); len(off) > 0 {

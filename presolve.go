@@ -95,10 +95,13 @@ type PresolveUndo struct {
 //     dropped when feasible.
 //
 // Presolve returns a non-nil [PresolveUndo] even on the terminal paths
-// (all-fixed / infeasible / unbounded) so callers can still recover
-// variable values and the objective shift. When it cannot return a
+// (all-fixed / infeasible / unbounded). When it cannot return a
 // reduced Problem (terminal path, or a malformed model) the reduced
-// Problem pointer is nil and [PresolveUndo.Terminal] is set.
+// Problem pointer is nil and [PresolveUndo.Terminal] is set. Callers
+// that want to synthesize a [Result] from a terminal undo directly —
+// without going back through [Problem.Solve] — can pass the undo to
+// [Problem.Solve] (which handles this path transparently) or inspect
+// [PresolveUndo.Terminal] and [PresolveUndo.TerminalMsg] themselves.
 func (p *Problem) Presolve(opts *PresolveOptions) (*Problem, *PresolveUndo, error) {
 	tol := 1e-9
 	if opts != nil && opts.Tolerance > 0 {
@@ -193,9 +196,10 @@ func (p *Problem) Presolve(opts *PresolveOptions) (*Problem, *PresolveUndo, erro
 		undo.objShift = obj - p.objConst
 		undo.Terminal = Optimal
 		undo.TerminalMsg = "presolve: all variables fixed"
-		// Synthesize a nominal result objective ride-along isn't our job
-		// here; Solve() reads undo.varValue + objConst + objShift and
-		// builds the Result.
+		// Solve() synthesizes the terminal Result by calling
+		// undo.terminalResult(), which recomputes the user-sense
+		// objective directly from undo.varValue and the original
+		// problem's objective coefficients / constant.
 		return nil, undo, nil
 	}
 

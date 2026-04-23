@@ -148,11 +148,10 @@ func TestPresolveEmptyRowInfeasible(t *testing.T) {
 //	     x, y >= 0
 //	     k ∈ [0, 7]
 //
-// Presolve settles k = 0 (we're maximising; coefficient on k is +3;
-// maximising 3k with bounds [0, 7] wants the upper bound 7 though).
-// Wait — for Maximize with +3 coefficient we want k at its upper
-// bound. Optimum: k = 7, objective piece from k = 21. Then the LP
-// degenerates to max 5x - 2y with x+y <= 10 → x=10, y=0. Total = 71.
+// For a Maximize sense with a positive coefficient on k, presolve
+// pins k at its upper bound 7, contributing 3·7 = 21 to the
+// objective. The residual LP becomes max 5x - 2y s.t. x+y <= 10,
+// whose optimum is x=10, y=0. Total objective = 50 + 21 = 71.
 func TestPresolveObjectiveOnlyVariable(t *testing.T) {
 	p := NewProblem("obj_only", Maximize)
 	x := p.NewVar("x", Continuous)
@@ -258,5 +257,40 @@ func TestPresolveAllVariablesFixed(t *testing.T) {
 	}
 	if res.Iterations != 0 {
 		t.Errorf("iterations = %d, want 0 (simplex should not run)", res.Iterations)
+	}
+}
+
+// TestPresolveTerminalOptimalIntegralityWarning: when presolve fully
+// solves a model by fixing every variable, the post-solve integrality
+// check must still fire. Here an Integer variable is pinned to 0.5 by
+// its bounds, which is LP-feasible but not ILP-feasible; Solve() must
+// surface the v0.1 WarnLPRelaxationOnly warning even though the
+// simplex never ran.
+func TestPresolveTerminalOptimalIntegralityWarning(t *testing.T) {
+	p := NewProblem("fixed_noninteger", Minimize)
+	x := p.NewVar("x", Integer, Bounds(0.5, 0.5))
+	p.SetObjective(Expr{x: 1})
+	p.AddConstraint("trivial", Expr{x: 1}, GTE, 0)
+
+	res, err := p.Solve()
+	if err != nil || res.Status != Optimal {
+		t.Fatalf("Solve: status=%v err=%v", res.Status, err)
+	}
+	if res.Iterations != 0 {
+		t.Errorf("iterations = %d, want 0 (terminal-Optimal path)", res.Iterations)
+	}
+	if !approxEq(res.Value(x), 0.5) {
+		t.Errorf("x = %g, want 0.5", res.Value(x))
+	}
+	var gotWarn bool
+	for _, w := range res.Warnings {
+		if strings.HasPrefix(w, WarnLPRelaxationOnly) {
+			gotWarn = true
+			break
+		}
+	}
+	if !gotWarn {
+		t.Errorf("expected %q warning on terminal-Optimal presolve path; got Warnings=%v Message=%q",
+			WarnLPRelaxationOnly, res.Warnings, res.Message)
 	}
 }

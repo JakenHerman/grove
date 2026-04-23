@@ -207,15 +207,18 @@ prob.SkipPresolve  = true  // bypass the pre-simplex reduction pass (v0.2)
         <li>
           <strong>Empty columns.</strong> A variable that — after
           fixed-variable substitution — appears in no constraint is
-          settled at whichever bound minimises its objective
-          contribution. A positive coefficient in a minimisation
-          pins it to the lower bound; a negative coefficient pins it
-          to the upper bound; a zero coefficient leaves it at the
-          lower bound. If the improving direction is unbounded
-          (e.g. a free variable with a nonzero objective coefficient
-          that never appears in a constraint), presolve returns a
-          <code>Result</code> with <code>Status == Unbounded</code>
-          without ever touching the simplex.
+          settled at whichever bound improves the user-sense
+          objective. For a <code>Minimize</code> problem a positive
+          coefficient pins the variable at its lower bound and a
+          negative coefficient pins it at its upper bound; for
+          <code>Maximize</code> the signs flip. A zero coefficient
+          leaves the variable at its lower bound (or the upper bound
+          if the lower is <code>-Inf</code>). If the improving
+          direction is unbounded — for example, a free variable with
+          a nonzero objective coefficient that never appears in a
+          constraint — presolve returns a <code>Result</code> with
+          <code>Status == Unbounded</code> without ever touching the
+          simplex.
         </li>
         <li>
           <strong>Empty rows.</strong> A constraint whose LHS
