@@ -285,6 +285,17 @@
           <span class="sig">func (p *Problem) WriteMPS(w io.Writer) error</span>
           <p>Writes the problem in fixed-column MPS format.</p>
         </div>
+        <div class="def">
+          <span class="sig">func ReadLP(r io.Reader) (*Problem, error)</span>
+          <p>Parses a problem from CPLEX-LP format — the inverse of <code>WriteLP</code>. Accepts the usual tolerances (case-insensitive keywords, abbreviated headers, multi-line expressions, backslash comments, blank lines anywhere). Parse errors are returned as <code>*grove.ParseError</code>; see below.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type ParseError struct {
+  Line, Col int
+  Msg       string
+}</span>
+          <p>Structured error returned by <code>ReadLP</code>. <code>Line</code> is 1-based; <code>Col</code> is 1-based when the position inside a line is meaningful and <code>0</code> otherwise. Extract with <code>errors.As</code> to drive editor highlights, etc. <code>Error()</code> folds the prefix <code>"grove: LP parse error …"</code> around <code>Msg</code>.</p>
+        </div>
       </div>
 
       <h2>Result</h2>
