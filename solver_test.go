@@ -259,7 +259,7 @@ func TestDegenerateBland(t *testing.T) {
 // TestValidateNoVars: build a problem with no variables.
 func TestValidateNoVars(t *testing.T) {
 	p := NewProblem("empty", Minimize)
-	if err := p.Validate(); err == nil {
+	if errs := p.Validate(); len(errs) == 0 {
 		t.Fatal("want error")
 	}
 }
@@ -268,7 +268,7 @@ func TestValidateNoVars(t *testing.T) {
 func TestValidateNoObjective(t *testing.T) {
 	p := NewProblem("noobj", Minimize)
 	p.NewVar("x", Continuous)
-	if err := p.Validate(); err == nil {
+	if errs := p.Validate(); len(errs) == 0 {
 		t.Fatal("want error")
 	}
 }

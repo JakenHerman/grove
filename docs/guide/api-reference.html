@@ -269,8 +269,57 @@
 
       <div class="def-grid">
         <div class="def">
-          <span class="sig">func (p *Problem) Validate() error</span>
-          <p>Runs the sanity checks (non-empty variables/constraints, unique names, no inverted <code>Bounds</code>, non-nil objective, no cross-problem <code>*Var</code>s). Automatically invoked at the top of <code>Solve</code>.</p>
+          <span class="sig">func (p *Problem) Validate() []error</span>
+          <p>
+            Returns every modeling problem it finds in one pass — an
+            empty/nil slice means the model is valid. The checks cover
+            missing variables/objective, all-zero objective, inverted
+            or NaN bounds, NaN/±Inf objective and constraint
+            coefficients, NaN/±Inf right-hand sides, empty-row and
+            all-zero-row constraints, and duplicate constraint names.
+            Each error is a <code>*ValidationError</code> carrying a
+            stable <code>Kind</code> classifier; see
+            <a href="./modeling.html#validation">Validation</a>.
+            <code>Solve</code> invokes <code>Validate</code>
+            automatically and refuses to run when the returned slice
+            is non-empty.
+          </p>
+        </div>
+        <div class="def">
+          <span class="sig">type ValidationError struct {
+  Kind    ValidationErrorKind
+  Target  string
+  Message string
+}</span>
+          <p>
+            Single issue returned from <code>Problem.Validate</code>.
+            <code>Kind</code> is a stable string classifier;
+            <code>Target</code> is the variable or constraint name (or
+            <code>""</code> for problem-level errors);
+            <code>Message</code> is the human-readable text
+            (<code>Error()</code> returns it verbatim). Pull a specific
+            kind out of a <code>[]error</code> with
+            <code>errors.As(err, &amp;verr)</code>.
+          </p>
+        </div>
+        <div class="def">
+          <span class="sig">type ValidationErrorKind string</span>
+          <p>
+            Stable classifier constants:
+            <code>ValidationNoVariables</code>,
+            <code>ValidationNoObjective</code>,
+            <code>ValidationZeroObjective</code>,
+            <code>ValidationBadBound</code>,
+            <code>ValidationInvertedBounds</code>,
+            <code>ValidationBadObjectiveCoef</code>,
+            <code>ValidationBadRHS</code>,
+            <code>ValidationEmptyRow</code>,
+            <code>ValidationZeroRow</code>,
+            <code>ValidationBadCoefficient</code>,
+            <code>ValidationDuplicateConstraint</code>.
+            See <a href="./modeling.html#validation">Validation</a>
+            for what each one catches.
+          </p>
         </div>
         <div class="def">
           <span class="sig">func (p *Problem) Solve() (*Result, error)</span>

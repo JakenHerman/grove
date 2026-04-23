@@ -26,6 +26,7 @@
 package grove
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -380,41 +381,217 @@ func (p *Problem) AddConstraint(name string, e Expr, ctype ConstraintType, rhs f
 // ConstraintByName returns the constraint with the given name, or nil if absent.
 func (p *Problem) ConstraintByName(name string) *Constraint { return p.consNames[name] }
 
-// Validate checks the problem for obvious modeling errors and returns a
-// non-nil error if any are found. [Problem.Solve] runs Validate
-// implicitly; call it directly if you want to fail fast at build time.
-func (p *Problem) Validate() error {
+// ValidationErrorKind classifies a structured validation failure
+// returned from [Problem.Validate]. Use [errors.As] to inspect a
+// specific error returned from the slice.
+type ValidationErrorKind string
+
+// Validation error kinds. These string constants are part of grove's
+// stable surface — callers can switch on them from tooling that wants
+// to present validation issues more richly than a log line.
+const (
+	// ValidationNoVariables: the problem has no variables at all.
+	ValidationNoVariables ValidationErrorKind = "no_variables"
+	// ValidationNoObjective: [Problem.SetObjective] was never called
+	// (the objective map is empty).
+	ValidationNoObjective ValidationErrorKind = "no_objective"
+	// ValidationZeroObjective: every objective coefficient is zero.
+	// grove treats this as a modeling mistake; add a non-zero
+	// coefficient or drop the objective entirely.
+	ValidationZeroObjective ValidationErrorKind = "zero_objective"
+	// ValidationBadBound: a variable has a NaN lower or upper bound.
+	ValidationBadBound ValidationErrorKind = "bad_bound"
+	// ValidationInvertedBounds: a variable's low > high, leaving an
+	// empty domain.
+	ValidationInvertedBounds ValidationErrorKind = "inverted_bounds"
+	// ValidationBadObjectiveCoef: the objective has a NaN or ±Inf
+	// coefficient on some variable.
+	ValidationBadObjectiveCoef ValidationErrorKind = "bad_objective_coefficient"
+	// ValidationBadRHS: a constraint's right-hand side is NaN or ±Inf.
+	ValidationBadRHS ValidationErrorKind = "bad_rhs"
+	// ValidationEmptyRow: a constraint's LHS is an empty expression
+	// (map of length zero).
+	ValidationEmptyRow ValidationErrorKind = "empty_row"
+	// ValidationZeroRow: a constraint's LHS has at least one term but
+	// every coefficient is zero.
+	ValidationZeroRow ValidationErrorKind = "zero_row"
+	// ValidationBadCoefficient: a constraint has a NaN or ±Inf
+	// coefficient on some variable.
+	ValidationBadCoefficient ValidationErrorKind = "bad_coefficient"
+	// ValidationDuplicateConstraint: two or more constraints share
+	// the same name.
+	ValidationDuplicateConstraint ValidationErrorKind = "duplicate_constraint"
+)
+
+// ValidationError is a single problem found by [Problem.Validate].
+// Callers that want to react to a specific class of error (e.g. skip
+// duplicate-name complaints in an auto-generated model) can use
+// [errors.As] to pull one out of the returned slice:
+//
+//	var verr *grove.ValidationError
+//	if errors.As(err, &verr) && verr.Kind == grove.ValidationDuplicateConstraint {
+//	    // ...
+//	}
+type ValidationError struct {
+	// Kind is the stable classifier for this error.
+	Kind ValidationErrorKind
+	// Target is the name of the variable or constraint the error is
+	// about, or "" for problem-level errors.
+	Target string
+	// Message is the human-readable error text.
+	Message string
+}
+
+// Error implements the error interface.
+func (e *ValidationError) Error() string { return e.Message }
+
+// Validate checks the problem for modeling errors and returns every
+// problem it finds. The returned slice is nil/empty when the model is
+// valid. [Problem.Solve] runs Validate implicitly and refuses to solve
+// if the slice is non-empty; call it directly if you want to fail fast
+// at build time or collect every issue before showing the user.
+//
+// The checks Validate performs:
+//
+//   - The problem has at least one variable.
+//   - Every variable has finite (non-NaN) bounds and low ≤ high.
+//   - [Problem.SetObjective] was called, and the objective has at
+//     least one non-zero coefficient. All objective coefficients must
+//     be finite.
+//   - Every constraint has a finite right-hand side, a non-empty LHS
+//     with at least one non-zero coefficient, and finite coefficients
+//     throughout.
+//   - Constraint names are unique across the problem.
+//
+// Validate never short-circuits: it accumulates every error it can find
+// so a single call surfaces the whole class of problems at once.
+func (p *Problem) Validate() []error {
+	var errs []error
+
 	if len(p.vars) == 0 {
-		return fmt.Errorf("grove: problem %q has no variables", p.name)
+		errs = append(errs, &ValidationError{
+			Kind:    ValidationNoVariables,
+			Message: fmt.Sprintf("grove: problem %q has no variables", p.name),
+		})
 	}
+
 	for _, v := range p.vars {
-		if math.IsNaN(v.low) || math.IsNaN(v.high) {
-			return fmt.Errorf("grove: variable %q has NaN bound", v.name)
-		}
-		if v.low > v.high {
-			return fmt.Errorf("grove: variable %q has empty domain [%g, %g]", v.name, v.low, v.high)
+		switch {
+		case math.IsNaN(v.low) || math.IsNaN(v.high):
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationBadBound,
+				Target:  v.name,
+				Message: fmt.Sprintf("grove: variable %q has NaN bound", v.name),
+			})
+		case v.low > v.high:
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationInvertedBounds,
+				Target:  v.name,
+				Message: fmt.Sprintf("grove: variable %q has empty domain [%g, %g] (low > high)", v.name, v.low, v.high),
+			})
 		}
 	}
+
 	if len(p.objective) == 0 {
-		return fmt.Errorf("grove: problem %q has no objective (call SetObjective)", p.name)
-	}
-	for _, c := range p.constraints {
-		if math.IsNaN(c.rhs) {
-			return fmt.Errorf("grove: constraint %q has NaN right-hand side", c.name)
-		}
-		if math.IsInf(c.rhs, 0) {
-			return fmt.Errorf("grove: constraint %q has infinite right-hand side", c.name)
-		}
-		if len(c.expr) == 0 {
-			return fmt.Errorf("grove: constraint %q has empty left-hand side", c.name)
-		}
-		for v, coef := range c.expr {
+		errs = append(errs, &ValidationError{
+			Kind:    ValidationNoObjective,
+			Message: fmt.Sprintf("grove: problem %q has no objective (call SetObjective)", p.name),
+		})
+	} else {
+		nonZero := 0
+		for v, coef := range p.objective {
 			if math.IsNaN(coef) || math.IsInf(coef, 0) {
-				return fmt.Errorf("grove: constraint %q has non-finite coefficient on %q", c.name, v.name)
+				errs = append(errs, &ValidationError{
+					Kind:    ValidationBadObjectiveCoef,
+					Target:  v.name,
+					Message: fmt.Sprintf("grove: objective has non-finite coefficient on %q", v.name),
+				})
+				continue
+			}
+			if coef != 0 {
+				nonZero++
 			}
 		}
+		if nonZero == 0 {
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationZeroObjective,
+				Message: fmt.Sprintf("grove: problem %q has an all-zero objective (SetObjective needs at least one non-zero coefficient)", p.name),
+			})
+		}
 	}
-	return nil
+
+	// Duplicate constraint names: walk the slice so we still catch
+	// collisions if a caller reaches past AddConstraint (which panics
+	// on duplicates at registration time). Reporting here means
+	// Validate is the single source of truth for a model audit.
+	seen := make(map[string]int, len(p.constraints))
+	for _, c := range p.constraints {
+		seen[c.name]++
+	}
+	// Report duplicates in stable declaration order.
+	reported := make(map[string]bool, len(seen))
+	for _, c := range p.constraints {
+		n := seen[c.name]
+		if n <= 1 || reported[c.name] {
+			continue
+		}
+		reported[c.name] = true
+		errs = append(errs, &ValidationError{
+			Kind:    ValidationDuplicateConstraint,
+			Target:  c.name,
+			Message: fmt.Sprintf("grove: constraint name %q is used by %d constraints (names must be unique)", c.name, n),
+		})
+	}
+
+	for _, c := range p.constraints {
+		switch {
+		case math.IsNaN(c.rhs):
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationBadRHS,
+				Target:  c.name,
+				Message: fmt.Sprintf("grove: constraint %q has NaN right-hand side", c.name),
+			})
+		case math.IsInf(c.rhs, 0):
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationBadRHS,
+				Target:  c.name,
+				Message: fmt.Sprintf("grove: constraint %q has infinite right-hand side", c.name),
+			})
+		}
+
+		if len(c.expr) == 0 {
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationEmptyRow,
+				Target:  c.name,
+				Message: fmt.Sprintf("grove: constraint %q has empty left-hand side", c.name),
+			})
+			continue
+		}
+
+		hasNonZero := false
+		for v, coef := range c.expr {
+			if math.IsNaN(coef) || math.IsInf(coef, 0) {
+				errs = append(errs, &ValidationError{
+					Kind:    ValidationBadCoefficient,
+					Target:  c.name,
+					Message: fmt.Sprintf("grove: constraint %q has non-finite coefficient on %q", c.name, v.name),
+				})
+				continue
+			}
+			if coef != 0 {
+				hasNonZero = true
+			}
+		}
+		if !hasNonZero {
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationZeroRow,
+				Target:  c.name,
+				Message: fmt.Sprintf("grove: constraint %q has an all-zero left-hand side", c.name),
+			})
+		}
+	}
+
+	return errs
 }
 
 // Result is the outcome of a solve.
@@ -498,7 +675,8 @@ func (r *Result) Reduced(v *Var) float64 {
 // integrality before returning, and this warning will fall silent
 // whenever the model is a pure LP or the ILP is solved exactly.
 func (p *Problem) Solve() (*Result, error) {
-	if err := p.Validate(); err != nil {
+	if verrs := p.Validate(); len(verrs) > 0 {
+		err := errors.Join(verrs...)
 		return &Result{Status: NotSolved, Message: err.Error()}, err
 	}
 
