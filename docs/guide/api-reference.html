@@ -290,11 +290,32 @@
           <p>Parses a problem from CPLEX-LP format — the inverse of <code>WriteLP</code>. Accepts the usual tolerances (case-insensitive keywords, abbreviated headers, multi-line expressions, backslash comments, blank lines anywhere). Parse errors are returned as <code>*grove.ParseError</code>; see below.</p>
         </div>
         <div class="def">
+          <span class="sig">func ReadMPS(r io.Reader, opts ...MPSOption) (*Problem, error)</span>
+          <p>Parses a problem from fixed-column or free-form MPS — the inverse of <code>WriteMPS</code>. Handles <code>NAME</code>, <code>OBJSENSE</code>, <code>ROWS</code>, <code>COLUMNS</code> (with <code>INTORG</code>/<code>INTEND</code> markers), <code>RHS</code>, <code>RANGES</code>, <code>BOUNDS</code>, and <code>ENDATA</code>; <code>SOS</code> sections are silently skipped. Auto-detects fixed vs free form by default; use <code>MPSFixedInput()</code> or <code>MPSFreeInput()</code> to override. Range rows raise an error (grove doesn&rsquo;t model range constraints yet).</p>
+        </div>
+        <div class="def">
+          <span class="sig">type MPSFormat int</span>
+          <p>Selects the MPS encoding. Values: <code>MPSAuto</code> (default), <code>MPSFixed</code>, <code>MPSFree</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type MPSOption func(*mpsConfig)</span>
+          <p>Functional option for <code>ReadMPS</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func MPSFixedInput() MPSOption</span>
+          <p>Forces the parser onto the strict fixed-column layout, bypassing auto-detection.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func MPSFreeInput() MPSOption</span>
+          <p>Forces the parser onto whitespace-separated free-form MPS, bypassing auto-detection.</p>
+        </div>
+        <div class="def">
           <span class="sig">type ParseError struct {
   Line, Col int
   Msg       string
+  Format    string
 }</span>
-          <p>Structured error returned by <code>ReadLP</code>. <code>Line</code> is 1-based; <code>Col</code> is 1-based when the position inside a line is meaningful and <code>0</code> otherwise. Extract with <code>errors.As</code> to drive editor highlights, etc. <code>Error()</code> folds the prefix <code>"grove: LP parse error …"</code> around <code>Msg</code>.</p>
+          <p>Structured error returned by <code>ReadLP</code> and <code>ReadMPS</code>. <code>Line</code> is 1-based; <code>Col</code> is 1-based when the position inside a line is meaningful and <code>0</code> otherwise. <code>Format</code> names the file format (<code>"LP"</code> or <code>"MPS"</code>) and appears in the rendered message. Extract with <code>errors.As</code> to drive editor highlights, etc. <code>Error()</code> folds the prefix <code>"grove: LP parse error …"</code> or <code>"grove: MPS parse error …"</code> around <code>Msg</code>.</p>
         </div>
       </div>
 

@@ -57,12 +57,16 @@ func ReadLP(r io.Reader) (*Problem, error) {
 	return parseLP(r)
 }
 
-// ParseError is the error type returned by [ReadLP] for malformed
-// input. Line and Col are 1-based; Col is 0 when a position inside a
-// line isn't meaningful (for example, when the error is about a missing
-// section header). Msg is the bare diagnostic — the fully formatted
-// form produced by Error also carries the "grove: LP parse error …"
-// prefix.
+// ParseError is the error type returned by [ReadLP] and [ReadMPS] for
+// malformed input. Line and Col are 1-based; Col is 0 when a position
+// inside a line isn't meaningful (for example, when the error is about
+// a missing section header). Msg is the bare diagnostic — the fully
+// formatted form produced by Error also carries the "grove: LP parse
+// error …" (or "grove: MPS parse error …") prefix.
+//
+// Format names the file format being parsed ("LP" or "MPS"). It is
+// empty when unspecified, in which case the error prefix defaults to
+// "LP" for backwards compatibility.
 //
 // Callers may type-assert on *ParseError (or use [errors.As]) to pull
 // the structured line/column out, e.g. to underline the offending spot
@@ -75,22 +79,27 @@ func ReadLP(r io.Reader) (*Problem, error) {
 type ParseError struct {
 	Line, Col int
 	Msg       string
+	Format    string
 }
 
 // Error formats the parse error with its line (and column, when known).
 func (e *ParseError) Error() string {
+	f := e.Format
+	if f == "" {
+		f = "LP"
+	}
 	switch {
 	case e.Col > 0 && e.Line > 0:
-		return fmt.Sprintf("grove: LP parse error at line %d, column %d: %s", e.Line, e.Col, e.Msg)
+		return fmt.Sprintf("grove: %s parse error at line %d, column %d: %s", f, e.Line, e.Col, e.Msg)
 	case e.Line > 0:
-		return fmt.Sprintf("grove: LP parse error at line %d: %s", e.Line, e.Msg)
+		return fmt.Sprintf("grove: %s parse error at line %d: %s", f, e.Line, e.Msg)
 	default:
-		return "grove: LP parse error: " + e.Msg
+		return fmt.Sprintf("grove: %s parse error: %s", f, e.Msg)
 	}
 }
 
 func errAt(line, col int, format string, args ...any) *ParseError {
-	return &ParseError{Line: line, Col: col, Msg: fmt.Sprintf(format, args...)}
+	return &ParseError{Line: line, Col: col, Msg: fmt.Sprintf(format, args...), Format: "LP"}
 }
 
 // srcLine is an input line with its original 1-based line number.
