@@ -189,6 +189,30 @@ func TestPresolveObjectiveOnlyVariable(t *testing.T) {
 	}
 }
 
+// TestPresolveReducedProblemEmptyObjectiveValidates: when every
+// linear objective term is on a variable eliminated by presolve, the
+// reduced problem has an empty objective map and cost only in
+// ObjectiveConstant; it must still pass Validate.
+func TestPresolveReducedProblemEmptyObjectiveValidates(t *testing.T) {
+	p := NewProblem("fold_all_obj", Maximize)
+	x := p.NewVar("x", Continuous)
+	y := p.NewVar("y", Continuous)
+	k := p.NewVar("k", Continuous, Bounds(0, 7))
+	p.SetObjective(Expr{k: 3})
+	p.AddConstraint("cap", Expr{x: 1, y: 1}, LTE, 10)
+
+	rp, _, err := p.Presolve(nil)
+	if err != nil {
+		t.Fatalf("Presolve: %v", err)
+	}
+	if len(rp.Objective()) != 0 {
+		t.Fatalf("want empty reduced objective map, got len=%d", len(rp.Objective()))
+	}
+	if errs := rp.Validate(); len(errs) != 0 {
+		t.Fatalf("Validate(reduced): %v", errs)
+	}
+}
+
 // TestPresolveObjectiveOnlyUnbounded: a free variable that only
 // appears in the objective proves unboundedness without touching the
 // simplex.

@@ -111,11 +111,12 @@ func TestValidateBoundsInverted(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected inverted-bounds error")
 	}
-	if !hasValidationKind(errs, ValidationInvertedBounds) {
+	ve := validationErrorForKind(errs, ValidationInvertedBounds)
+	if ve == nil {
 		t.Fatalf("errs=%v want ValidationInvertedBounds", errs)
 	}
-	if !strings.Contains(errs[0].Error(), "empty domain") {
-		t.Fatalf("message=%q", errs[0].Error())
+	if !strings.Contains(ve.Message, "empty domain") {
+		t.Fatalf("message=%q", ve.Message)
 	}
 }
 
@@ -131,18 +132,27 @@ func TestValidateNaNCoefficient(t *testing.T) {
 	if !hasValidationKind(errs, ValidationBadCoefficient) {
 		t.Fatalf("errs=%v want ValidationBadCoefficient", errs)
 	}
+	if hasValidationKind(errs, ValidationZeroRow) {
+		t.Fatalf("did not want ValidationZeroRow when row has only non-finite coefs: %v", errs)
+	}
 }
 
 // hasValidationKind reports whether errs contains a *ValidationError
 // with the given Kind.
 func hasValidationKind(errs []error, k ValidationErrorKind) bool {
+	return validationErrorForKind(errs, k) != nil
+}
+
+// validationErrorForKind returns the first *ValidationError in errs with
+// the given Kind, or nil.
+func validationErrorForKind(errs []error, k ValidationErrorKind) *ValidationError {
 	for _, err := range errs {
 		var ve *ValidationError
 		if errors.As(err, &ve) && ve.Kind == k {
-			return true
+			return ve
 		}
 	}
-	return false
+	return nil
 }
 
 func TestValidateDuplicateConstraintName(t *testing.T) {
@@ -219,6 +229,21 @@ func TestValidateInfObjectiveCoefficient(t *testing.T) {
 	p.SetObjective(Expr{x: math.Inf(1)})
 	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
 	errs := p.Validate()
+	if !hasValidationKind(errs, ValidationBadObjectiveCoef) {
+		t.Fatalf("errs=%v want ValidationBadObjectiveCoef", errs)
+	}
+}
+
+func TestValidateObjectiveNonFiniteOnlyNoZeroObjective(t *testing.T) {
+	p := NewProblem("p", Minimize)
+	x := p.NewVar("x", Continuous)
+	y := p.NewVar("y", Continuous)
+	p.SetObjective(Expr{x: math.NaN(), y: math.Inf(1)})
+	p.AddConstraint("c", Expr{x: 1}, GTE, 0)
+	errs := p.Validate()
+	if hasValidationKind(errs, ValidationZeroObjective) {
+		t.Fatalf("did not want ValidationZeroObjective alongside only non-finite objective coefs: %v", errs)
+	}
 	if !hasValidationKind(errs, ValidationBadObjectiveCoef) {
 		t.Fatalf("errs=%v want ValidationBadObjectiveCoef", errs)
 	}

@@ -273,10 +273,14 @@
           <p>
             Returns every modeling problem it finds in one pass — an
             empty/nil slice means the model is valid. The checks cover
-            missing variables/objective, all-zero objective, inverted
-            or NaN bounds, NaN/±Inf objective and constraint
-            coefficients, NaN/±Inf right-hand sides, empty-row and
-            all-zero-row constraints, and duplicate constraint names.
+            missing variables/objective (except presolve-reduced models
+            whose linear objective was folded entirely into
+            <code>ObjectiveConstant</code>), all-zero objective when
+            every stated coefficient is finite, inverted bounds and NaN
+            bounds (±<code>Inf</code> remains valid for unbounded sides),
+            NaN/±Inf objective and constraint coefficients, NaN/±Inf
+            right-hand sides, empty LHS rows, all-zero LHS rows when
+            every coefficient is finite, and duplicate constraint names.
             Each error is a <code>*ValidationError</code> carrying a
             stable <code>Kind</code> classifier; see
             <a href="./modeling.html#validation">Validation</a>.

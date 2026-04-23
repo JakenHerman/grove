@@ -280,11 +280,16 @@ fmt.Println(res.Dual(budget)) // ∂z*/∂rhs of `budget`
           <tr>
             <td><code>ValidationZeroObjective</code></td>
             <td>
-              Every objective coefficient is zero. grove treats this as
-              a modeling mistake rather than a silent feasibility
-              problem — add a non-zero coefficient on at least one
-              variable, or drop the objective call entirely and wait
-              for <code>ValidationNoObjective</code>.
+              Every objective coefficient is finite and zero. If any
+              coefficient is NaN or ±Inf, only
+              <code>ValidationBadObjectiveCoef</code> is reported for
+              those terms. grove treats an all-finite-zero objective as
+              a modeling mistake — add a non-zero coefficient on at
+              least one variable, or (for user-built models) drop the
+              objective call entirely and hit <code>ValidationNoObjective</code>.
+              Presolve-reduced problems may legally have an empty objective
+              map when the linear part was folded into
+              <code>SetObjectiveConstant</code>.
             </td>
           </tr>
           <tr>
@@ -309,7 +314,7 @@ fmt.Println(res.Dual(budget)) // ∂z*/∂rhs of `budget`
           </tr>
           <tr>
             <td><code>ValidationZeroRow</code></td>
-            <td>A constraint has terms, but every coefficient is zero (<code>Expr{x: 0, y: 0}</code>). These would be dropped by presolve anyway; rejecting up front surfaces the likely modeling typo.</td>
+            <td>A constraint has a non-empty LHS and every coefficient is finite and zero (<code>Expr{x: 0, y: 0}</code>). Rows with any NaN/±Inf coefficient only report <code>ValidationBadCoefficient</code>, not <code>ValidationZeroRow</code>. These would be dropped by presolve anyway; rejecting up front surfaces the likely modeling typo.</td>
           </tr>
           <tr>
             <td><code>ValidationBadCoefficient</code></td>
@@ -341,9 +346,11 @@ for _, err := range prob.Validate() {
         Both <code>NewVar</code> and <code>AddConstraint</code> still
         panic on duplicate names at registration time; <code>Validate</code>
         exists to catch the same class of problem when a model is built
-        any other way — a file reader, a test fixture mutating
-        <code>Problem.Constraints</code> directly, or a code generator
-        assembling <code>Problem</code> from parts.
+        any other way — a file reader, code inside the
+        <code>grove</code> package that appends to the internal
+        constraint slice, or a test that mutates the live slice returned
+        by <code>Constraints()</code> (the backing array is shared; treat
+        it as read-only unless you know what you&rsquo;re doing).
       </p>
 
       <h2>Putting it together</h2>

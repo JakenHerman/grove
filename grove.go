@@ -268,6 +268,13 @@ type Problem struct {
 	// external references may want to turn it off. See
 	// [Problem.Presolve].
 	SkipPresolve bool
+
+	// allowEmptyObjective is set on reduced problems produced by
+	// [Problem.Presolve] when every linear objective term was folded
+	// into [Problem.ObjectiveConstant]. Such models have an empty
+	// objective [Expr] but are still valid for [Problem.Validate] and
+	// the solver. User-built problems never set this flag.
+	allowEmptyObjective bool
 }
 
 // NewProblem returns an empty LP with the given name and optimization sense.
@@ -454,13 +461,17 @@ func (e *ValidationError) Error() string { return e.Message }
 // The checks Validate performs:
 //
 //   - The problem has at least one variable.
-//   - Every variable has finite (non-NaN) bounds and low ≤ high.
-//   - [Problem.SetObjective] was called, and the objective has at
-//     least one non-zero coefficient. All objective coefficients must
-//     be finite.
+//   - Variable bounds must not be NaN; ±Inf is a valid unbounded
+//     sentinel ([Inf]). Inverted intervals (low > high) are rejected.
+//   - For models built only through the public API, [Problem.SetObjective]
+//     must have been called with a non-empty map whose coefficients are
+//     all finite and include at least one non-zero value. Reduced
+//     problems returned from [Problem.Presolve] may legally have an
+//     empty objective map when every linear term was folded into
+//     [Problem.ObjectiveConstant].
 //   - Every constraint has a finite right-hand side, a non-empty LHS
-//     with at least one non-zero coefficient, and finite coefficients
-//     throughout.
+//     with at least one non-zero finite coefficient, and finite
+//     coefficients throughout.
 //   - Constraint names are unique across the problem.
 //
 // Validate never short-circuits: it accumulates every error it can find
@@ -493,14 +504,18 @@ func (p *Problem) Validate() []error {
 	}
 
 	if len(p.objective) == 0 {
-		errs = append(errs, &ValidationError{
-			Kind:    ValidationNoObjective,
-			Message: fmt.Sprintf("grove: problem %q has no objective (call SetObjective)", p.name),
-		})
+		if !p.allowEmptyObjective {
+			errs = append(errs, &ValidationError{
+				Kind:    ValidationNoObjective,
+				Message: fmt.Sprintf("grove: problem %q has no objective (call SetObjective)", p.name),
+			})
+		}
 	} else {
 		nonZero := 0
+		badObjectiveCoef := false
 		for v, coef := range p.objective {
 			if math.IsNaN(coef) || math.IsInf(coef, 0) {
+				badObjectiveCoef = true
 				errs = append(errs, &ValidationError{
 					Kind:    ValidationBadObjectiveCoef,
 					Target:  v.name,
@@ -512,7 +527,7 @@ func (p *Problem) Validate() []error {
 				nonZero++
 			}
 		}
-		if nonZero == 0 {
+		if nonZero == 0 && !badObjectiveCoef {
 			errs = append(errs, &ValidationError{
 				Kind:    ValidationZeroObjective,
 				Message: fmt.Sprintf("grove: problem %q has an all-zero objective (SetObjective needs at least one non-zero coefficient)", p.name),
@@ -569,8 +584,10 @@ func (p *Problem) Validate() []error {
 		}
 
 		hasNonZero := false
+		nonFiniteCoef := false
 		for v, coef := range c.expr {
 			if math.IsNaN(coef) || math.IsInf(coef, 0) {
+				nonFiniteCoef = true
 				errs = append(errs, &ValidationError{
 					Kind:    ValidationBadCoefficient,
 					Target:  c.name,
@@ -582,7 +599,7 @@ func (p *Problem) Validate() []error {
 				hasNonZero = true
 			}
 		}
-		if !hasNonZero {
+		if !hasNonZero && !nonFiniteCoef {
 			errs = append(errs, &ValidationError{
 				Kind:    ValidationZeroRow,
 				Target:  c.name,

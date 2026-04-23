@@ -229,16 +229,11 @@ func (p *Problem) Presolve(opts *PresolveOptions) (*Problem, *PresolveUndo, erro
 		}
 		redObj[revVarMap[v]] = k
 	}
-	// The simplex driver asks every column for its objective
-	// coefficient; if every original coefficient was on a fixed
-	// variable we fold into the constant and the reduced objective
-	// map ends up empty. Put a zero term on the first surviving
-	// variable so the reduced model still has a non-empty objective
-	// expression (Validate skips the reduced problem, but the solver
-	// core indexes into the map directly).
-	if len(redObj) == 0 {
-		redObj[rp.vars[0]] = 0
-	}
+	// If every original objective term was on a fixed variable, redObj
+	// is empty and the entire linear part lives in objConst. The
+	// standard-form builder only ranges over p.objective, so an empty
+	// map is fine; Validate allows it on reduced problems via
+	// allowEmptyObjective.
 	rp.SetObjective(redObj)
 	rp.SetObjectiveConstant(p.objConst + objShift)
 	undo.objShift = objShift
@@ -272,6 +267,7 @@ func newReducedProblem(p *Problem) *Problem {
 	rp.Verbose = p.Verbose
 	rp.MaxIterations = p.MaxIterations
 	rp.SkipPresolve = true // don't recursively presolve the reduced model
+	rp.allowEmptyObjective = true
 	return rp
 }
 
