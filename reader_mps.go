@@ -230,6 +230,21 @@ SCAN:
 		}
 
 		// Data line: dispatch to the current section's handler.
+		// If the caller pinned the parser to MPSFixed, reject any
+		// data line that violates the layout's whitespace gutters —
+		// that's the whole point of MPSFixedInput, to fail fast on
+		// files that silently rely on free-form semantics.
+		if st.format == MPSFixed {
+			switch section {
+			case mpsSecColumns, mpsSecRHS, mpsSecRanges, mpsSecBounds:
+				if looksFreeForm(text) {
+					return nil, errAtMPS(ln.no, 0,
+						"data line violates fixed-column MPS layout "+
+							"(field overflows its 8-column slot); "+
+							"use MPSFreeInput() or remove MPSFixedInput() to parse free-form MPS")
+				}
+			}
+		}
 		fields := strings.Fields(text)
 		if len(fields) == 0 {
 			continue
@@ -435,13 +450,31 @@ func (s *mpsState) parseRHSLine(ln srcLine, fields []string) error {
 
 // parseRangesLine recognises RANGES entries structurally but refuses to
 // lower them into grove constraints — grove does not (yet) model
-// range-style rows low ≤ a·x ≤ high. The caller gets a clear error
-// rather than a silently mangled problem. Empty ranges sections are
-// tolerated without issue.
+// range-style rows low ≤ a·x ≤ high. The caller gets the same
+// diagnostic the LP reader uses, with the offending row named so
+// they know where to edit. Empty RANGES sections (header with no
+// data lines) are tolerated without issue.
 func (s *mpsState) parseRangesLine(ln srcLine, fields []string) error {
+	// RANGES rows follow the same shape as RHS:
+	//
+	//	<rangename>  <row1>  <val1>  [<row2>  <val2>]
+	//
+	// The range-set name is optional in practice, so peek: if the
+	// first field names a known row, treat it as the row name.
+	rowName := ""
+	if len(fields) > 0 {
+		if _, isRow := s.rowsByName[fields[0]]; isRow {
+			rowName = fields[0]
+		} else if len(fields) > 1 {
+			rowName = fields[1]
+		}
+	}
+	if rowName != "" {
+		return errAtMPS(ln.no, 0,
+			"range constraints (low <= expr <= high) are not supported in constraint %q", rowName)
+	}
 	return errAtMPS(ln.no, 0,
-		"RANGES section is not supported (grove does not model range constraints); "+
-			"split the offending row into two separate constraints")
+		"range constraints (low <= expr <= high) are not supported")
 }
 
 // parseBoundLine parses one bound statement. Accepted forms:
@@ -523,8 +556,13 @@ func (s *mpsState) parseBoundLine(ln srcLine, fields []string) error {
 		col.low = math.Inf(-1)
 		col.hasLow = true
 	case "PL":
+		// PL restates the MPS default — nonnegative with no upper
+		// bound. Set both sides explicitly so that a preceding FR on
+		// the same variable (which pushed low to -Inf) is correctly
+		// overridden back to [0, +Inf).
+		col.low = 0
 		col.high = math.Inf(1)
-		col.hasHigh = true
+		col.hasLow, col.hasHigh = true, true
 	case "BV":
 		col.low, col.high = 0, 1
 		col.hasLow, col.hasHigh = true, true

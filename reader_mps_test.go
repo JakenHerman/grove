@@ -276,6 +276,74 @@ ENDATA
 	}
 }
 
+// TestReadMPSForcedFixedRejectsFreeForm confirms that MPSFixedInput
+// actually enforces the layout — free-form input with long names is
+// rejected with a clear error rather than silently parsed.
+func TestReadMPSForcedFixedRejectsFreeForm(t *testing.T) {
+	// Column name "long_variable_name" overflows the fixed 8-char
+	// slot at cols 5-12, so the first COLUMNS line violates the
+	// layout's whitespace gutters.
+	src := `NAME          free_form
+ROWS
+ N  obj
+ L  first_constraint
+ L  second_constraint
+COLUMNS
+ long_variable_name obj 1 first_constraint 2 second_constraint 3
+ y obj 1 first_constraint 1 second_constraint 1
+RHS
+ RHS first_constraint 10 second_constraint 20
+ENDATA
+`
+	_, err := ReadMPS(strings.NewReader(src), MPSFixedInput())
+	if err == nil {
+		t.Fatal("expected error from MPSFixedInput on free-form input")
+	}
+	if !strings.Contains(err.Error(), "fixed-column MPS layout") {
+		t.Errorf("error should call out the layout violation, got: %v", err)
+	}
+	// Sanity: the same input parses fine under MPSFreeInput or auto.
+	if _, err := ReadMPS(strings.NewReader(src), MPSFreeInput()); err != nil {
+		t.Errorf("MPSFreeInput should accept free-form input: %v", err)
+	}
+	if _, err := ReadMPS(strings.NewReader(src)); err != nil {
+		t.Errorf("auto-detect should accept free-form input: %v", err)
+	}
+}
+
+// TestReadMPSPLAfterFRResetsLowerBound pins PL semantics: even though
+// PL is usually redundant with the default, emitting it after FR has
+// to reset the variable back to the nonnegative default.
+func TestReadMPSPLAfterFRResetsLowerBound(t *testing.T) {
+	src := `NAME          pl_after_fr
+ROWS
+ N  obj
+ L  c1
+COLUMNS
+    x         obj              1   c1               1
+RHS
+    RHS       c1              10
+BOUNDS
+ FR BND       x
+ PL BND       x
+ENDATA
+`
+	p, err := ReadMPS(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("ReadMPS: %v", err)
+	}
+	v := p.VarByName("x")
+	if v == nil {
+		t.Fatal("missing x")
+	}
+	if v.Low() != 0 {
+		t.Errorf("PL after FR: low = %g, want 0", v.Low())
+	}
+	if !math.IsInf(v.High(), 1) {
+		t.Errorf("PL after FR: high = %g, want +Inf", v.High())
+	}
+}
+
 // ── OBJSENSE section ────────────────────────────────────────────────
 
 func TestReadMPSObjsenseMaximize(t *testing.T) {
@@ -465,8 +533,14 @@ ENDATA
 	if err == nil {
 		t.Fatal("expected error on RANGES section")
 	}
-	if !strings.Contains(err.Error(), "range") {
-		t.Errorf("error should mention range constraints: %v", err)
+	// Wording should match the LP reader's diagnostic and should name
+	// the offending row so users know where to edit.
+	msg := err.Error()
+	if !strings.Contains(msg, "range constraints (low <= expr <= high) are not supported") {
+		t.Errorf("error should match LP reader wording, got: %v", err)
+	}
+	if !strings.Contains(msg, `"c1"`) {
+		t.Errorf("error should name the offending row c1, got: %v", err)
 	}
 }
 
