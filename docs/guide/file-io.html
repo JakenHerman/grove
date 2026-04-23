@@ -130,13 +130,25 @@ res, err := prob.Solve()
       </p>
 
       <p>
-        Parse errors are <code>*grove.parseError</code> values whose
+        Parse errors are <code>*grove.ParseError</code> values whose
         <code>Error()</code> includes the 1-based line (and column when
         available) so mistakes surface with a useful pointer into the
         file:
       </p>
 
 <pre><code>grove: LP parse error at line 5, column 11: expected '+' or '-' between terms
+</code></pre>
+
+      <p>
+        The <code>Line</code>, <code>Col</code>, and <code>Msg</code>
+        fields are exported, so tooling can pull them out with
+        <code>errors.As</code> to underline the offending spot:
+      </p>
+
+<pre><code class="language-go">var pe *grove.ParseError
+if errors.As(err, &amp;pe) {
+    highlight(path, pe.Line, pe.Col)
+}
 </code></pre>
 
       <p>

@@ -2,6 +2,7 @@ package grove
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -464,9 +465,9 @@ End
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	pe, ok := err.(*parseError)
-	if !ok {
-		t.Fatalf("error is not *parseError: %T (%v)", err, err)
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *ParseError: %T (%v)", err, err)
 	}
 	if pe.Line == 0 {
 		t.Errorf("parse error missing line number: %v", err)
@@ -518,8 +519,8 @@ func TestReadLPRangeConstraintDiagnostic(t *testing.T) {
 			if !strings.Contains(err.Error(), "range constraints") {
 				t.Errorf("error should mention range constraints, got: %v", err)
 			}
-			pe, ok := err.(*parseError)
-			if !ok || pe.Line == 0 {
+			var pe *ParseError
+			if !errors.As(err, &pe) || pe.Line == 0 {
 				t.Errorf("error should carry a line number: %v", err)
 			}
 		})

@@ -51,14 +51,28 @@ func ReadLP(r io.Reader) (*Problem, error) {
 	return parseLP(string(data))
 }
 
-// parseError carries a 1-based line and column so the caller can point
-// the user at the offending spot.
-type parseError struct {
+// ParseError is the error type returned by [ReadLP] for malformed
+// input. Line and Col are 1-based; Col is 0 when a position inside a
+// line isn't meaningful (for example, when the error is about a missing
+// section header). Msg is the bare diagnostic — the fully formatted
+// form produced by Error also carries the "grove: LP parse error …"
+// prefix.
+//
+// Callers may type-assert on *ParseError (or use [errors.As]) to pull
+// the structured line/column out, e.g. to underline the offending spot
+// in an editor:
+//
+//	var pe *grove.ParseError
+//	if errors.As(err, &pe) {
+//	    highlight(path, pe.Line, pe.Col)
+//	}
+type ParseError struct {
 	Line, Col int
 	Msg       string
 }
 
-func (e *parseError) Error() string {
+// Error formats the parse error with its line (and column, when known).
+func (e *ParseError) Error() string {
 	switch {
 	case e.Col > 0 && e.Line > 0:
 		return fmt.Sprintf("grove: LP parse error at line %d, column %d: %s", e.Line, e.Col, e.Msg)
@@ -69,8 +83,8 @@ func (e *parseError) Error() string {
 	}
 }
 
-func errAt(line, col int, format string, args ...any) *parseError {
-	return &parseError{Line: line, Col: col, Msg: fmt.Sprintf(format, args...)}
+func errAt(line, col int, format string, args ...any) *ParseError {
+	return &ParseError{Line: line, Col: col, Msg: fmt.Sprintf(format, args...)}
 }
 
 // srcLine is an input line with its original 1-based line number.
@@ -908,7 +922,7 @@ func parseLP(src string) (*Problem, error) {
 done:
 
 	if !senseFound {
-		return nil, &parseError{Msg: "missing Minimize/Maximize section"}
+		return nil, &ParseError{Msg: "missing Minimize/Maximize section"}
 	}
 
 	prob := NewProblem("", sense)
