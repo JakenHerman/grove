@@ -41,9 +41,13 @@ import (
 // The parser accepts the standard section-based LP grammar with common
 // tolerances: case-insensitive keywords, abbreviated forms (Min/Max,
 // s.t./st/such that, Bound, Gen/Integer/Integers, Bin/Binaries),
-// backslash comments, and blank lines anywhere. Unknown sections (e.g.
-// SOS) are skipped rather than rejected. Undeclared variables default
-// to [0, +Inf] continuous, matching the CPLEX default.
+// backslash comments, and blank lines anywhere. SOS sections are
+// recognized and silently skipped — grove does not model SOS sets
+// yet — but any other header grove does not know about is reported as
+// a parse error rather than silently dropped, so typos like
+// "Subkect To" don't quietly swallow a whole constraints block.
+// Undeclared variables default to [0, +Inf] continuous, matching the
+// CPLEX default.
 //
 // Input is consumed via a buffered line-by-line scan, so very large
 // files (e.g. MIPLIB instances) do not need to be held in memory all
