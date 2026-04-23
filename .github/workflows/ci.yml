@@ -44,7 +44,12 @@ jobs:
       - name: gofmt
         if: matrix.os != 'windows-latest'
         run: |
-          diff=$(gofmt -d .)
+          set -euo pipefail
+          if ! diff=$(gofmt -d . 2>&1); then
+            echo "gofmt failed:"
+            echo "$diff"
+            exit 1
+          fi
           if [ -n "$diff" ]; then
             echo "gofmt found unformatted files:"
             echo "$diff"
