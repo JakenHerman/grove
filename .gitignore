@@ -1,0 +1,28 @@
+# Go build and test artefacts
+*.test
+*.out
+*.prof
+/bin/
+/dist/
+coverage.out
+coverage.html
+
+# Go module download cache (not typically in-tree, but defensive)
+/vendor/
+
+# IDE / editor droppings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python venv used by the PuLP cross-check scripts in examples/usertest*/
+.venv/
+__pycache__/
+*.pyc
+
+# Local environment overrides
+.env
+.env.local
