@@ -565,7 +565,11 @@ func TestReadLPTestdataFile(t *testing.T) {
 	path := filepath.Join("testdata", "transport.lp")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("testdata file missing: %v", err)
+		// transport.lp is checked into the repo, so a read failure
+		// here indicates a packaging/CI problem (wrong cwd, missing
+		// testdata tree, etc.) and should fail loudly rather than
+		// silently skip.
+		t.Fatalf("read %s: %v", path, err)
 	}
 	p, err := ReadLP(bytes.NewReader(data))
 	if err != nil {
