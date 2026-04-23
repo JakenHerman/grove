@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // ── Comparison helpers ────────────────────────────────────────────────
@@ -578,4 +579,43 @@ func TestReadLPTestdataFile(t *testing.T) {
 	}
 	// Round-trip.
 	problemsEquivalent(t, p, roundTrip(t, p))
+}
+
+// TestReadLPStreamingOneByteReader pushes a small model through
+// iotest.OneByteReader so the bufio.Scanner under ReadLP has to
+// reassemble every single line a byte at a time. Exercises the
+// line-by-line streaming path without depending on file sizes.
+func TestReadLPStreamingOneByteReader(t *testing.T) {
+	src := "Minimize\n" +
+		" obj: 2 x + y\n" +
+		"Subject To\n" +
+		" c1: x + y >= 3\n" +
+		"Bounds\n" +
+		" 0 <= x <= 5\n" +
+		" y >= 0\n" +
+		"General\n" +
+		" x\n" +
+		"End\n"
+
+	p, err := ReadLP(iotest.OneByteReader(strings.NewReader(src)))
+	if err != nil {
+		t.Fatalf("ReadLP (one-byte reader): %v", err)
+	}
+	if p.Sense() != Minimize {
+		t.Errorf("sense = %v, want Minimize", p.Sense())
+	}
+	vs := indexVarsByName(p)
+	x, ok := vs["x"]
+	if !ok {
+		t.Fatalf("missing var x")
+	}
+	if x.Kind() != Integer {
+		t.Errorf("x kind = %v, want Integer", x.Kind())
+	}
+	if !boundsEqual(x.Low(), 0) || !boundsEqual(x.High(), 5) {
+		t.Errorf("x bounds = [%g,%g], want [0,5]", x.Low(), x.High())
+	}
+	if got := len(p.Constraints()); got != 1 {
+		t.Fatalf("constraint count = %d, want 1", got)
+	}
 }

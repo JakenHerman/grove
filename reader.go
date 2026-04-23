@@ -26,6 +26,7 @@ package grove
 // to make mistakes easy to locate.
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math"
@@ -43,12 +44,13 @@ import (
 // backslash comments, and blank lines anywhere. Unknown sections (e.g.
 // SOS) are skipped rather than rejected. Undeclared variables default
 // to [0, +Inf] continuous, matching the CPLEX default.
+//
+// Input is consumed via a buffered line-by-line scan, so very large
+// files (e.g. MIPLIB instances) do not need to be held in memory all
+// at once — peak allocation is bounded by the largest single section's
+// body plus the resulting *Problem.
 func ReadLP(r io.Reader) (*Problem, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	return parseLP(string(data))
+	return parseLP(r)
 }
 
 // ParseError is the error type returned by [ReadLP] for malformed
@@ -115,39 +117,95 @@ type section struct {
 	body   []srcLine
 }
 
-// splitSections walks the raw source and slices it at section headers.
-// Each returned section carries the body lines (with comments stripped)
-// between its own header and the next header. The initial (pre-header)
-// slice is returned as a secNone section and is expected to be empty
-// for well-formed input.
-func splitSections(src string) []section {
-	raw := strings.Split(src, "\n")
-	lines := make([]srcLine, 0, len(raw))
-	for i, s := range raw {
-		if j := strings.IndexByte(s, '\\'); j >= 0 {
-			s = s[:j]
-		}
-		s = strings.TrimRight(s, "\r")
-		lines = append(lines, srcLine{text: s, no: i + 1})
-	}
+// lineStream yields one source line at a time from an [io.Reader],
+// stripping trailing CR and backslash comments while tracking the
+// 1-based line number. It lets the parser walk huge LP files without
+// ever holding the full source in memory.
+type lineStream struct {
+	sc *bufio.Scanner
+	no int
+}
 
-	var sections []section
-	cur := section{kind: secNone}
-	for _, l := range lines {
-		trimmed := strings.TrimSpace(l.text)
-		if trimmed == "" {
-			cur.body = append(cur.body, l)
-			continue
+// maxLineBytes caps how long a single LP source line may be. The
+// Scanner default of 64 KiB is easily exceeded by the objective row of
+// a large MIPLIB instance, so we raise the ceiling to 16 MiB — big
+// enough for anything we've seen in practice, small enough to guard
+// against pathological input.
+const maxLineBytes = 16 << 20
+
+func newLineStream(r io.Reader) *lineStream {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	return &lineStream{sc: sc}
+}
+
+// next returns the next source line (comments stripped), a flag that
+// is false at EOF, and any underlying read error. The returned
+// srcLine.text is an independent allocation, safe to retain across
+// subsequent calls.
+func (l *lineStream) next() (srcLine, bool, error) {
+	if !l.sc.Scan() {
+		if err := l.sc.Err(); err != nil {
+			return srcLine{}, false, err
 		}
-		if kind, ok := matchSectionHeader(trimmed); ok {
-			sections = append(sections, cur)
-			cur = section{kind: kind, header: l.no}
-			continue
-		}
-		cur.body = append(cur.body, l)
+		return srcLine{}, false, nil
 	}
-	sections = append(sections, cur)
-	return sections
+	l.no++
+	raw := l.sc.Text()
+	if i := strings.IndexByte(raw, '\\'); i >= 0 {
+		raw = raw[:i]
+	}
+	raw = strings.TrimRight(raw, "\r")
+	return srcLine{text: raw, no: l.no}, true, nil
+}
+
+// nextHeader reads through any blank/comment-only lines until it finds
+// a section header or EOF. A non-empty, non-header line before any
+// header is a structural error. At EOF the returned kind is secNone
+// and no error is reported.
+func (l *lineStream) nextHeader() (sectionKind, int, error) {
+	for {
+		line, ok, err := l.next()
+		if err != nil {
+			return secNone, 0, err
+		}
+		if !ok {
+			return secNone, 0, nil
+		}
+		trimmed := strings.TrimSpace(line.text)
+		if trimmed == "" {
+			continue
+		}
+		if k, isH := matchSectionHeader(trimmed); isH {
+			return k, line.no, nil
+		}
+		return secNone, 0, errAt(line.no, 1, "content before Minimize/Maximize header")
+	}
+}
+
+// readSectionBody consumes lines for the current section until it hits
+// the next section header or EOF. It returns the accumulated body,
+// the kind and 1-based line number of the next header (secNone/0 at
+// EOF), and any scanner error.
+func readSectionBody(ls *lineStream) (body []srcLine, nextKind sectionKind, nextHeader int, err error) {
+	for {
+		line, ok, lerr := ls.next()
+		if lerr != nil {
+			return body, secNone, 0, lerr
+		}
+		if !ok {
+			return body, secNone, 0, nil
+		}
+		trimmed := strings.TrimSpace(line.text)
+		if trimmed == "" {
+			body = append(body, line)
+			continue
+		}
+		if k, isH := matchSectionHeader(trimmed); isH {
+			return body, k, line.no, nil
+		}
+		body = append(body, line)
+	}
 }
 
 // matchSectionHeader returns the section kind for a line that is
@@ -866,87 +924,86 @@ func hasContent(body []srcLine) bool {
 // picks up the objective sense, then hands each section to the
 // appropriate parser. The order mirrors the LP file format: objective,
 // then Subject To, then Bounds, then General/Binary, then End.
-func parseLP(src string) (*Problem, error) {
-	sections := splitSections(src)
+// parseLP streams LP source from r one section at a time. Objective,
+// Subject To, and Bounds sections are parsed inline as soon as their
+// bodies finish, so their source bytes are released before the next
+// section begins. General and Binary sections hold only identifier
+// names, so they are buffered and applied last — that way Binary's
+// bound-pinning wins over any earlier Bounds rows regardless of the
+// order they appear in the file (which matches the previous
+// collect-then-process driver).
+func parseLP(r io.Reader) (*Problem, error) {
+	ls := newLineStream(r)
+
+	firstKind, firstHeader, err := ls.nextHeader()
+	if err != nil {
+		return nil, err
+	}
 
 	var sense Sense
-	var senseFound bool
-	var objSection section
-	var stSection section
-	var boundsSection section
-	var generalSections []section
-	var binarySections []section
-
-	for _, sec := range sections {
-		switch sec.kind {
-		case secNone:
-			// Accept only empty preambles / trailing regions. A
-			// non-empty sectionless block is a structural error.
-			if hasContent(sec.body) && senseFound {
-				continue // tolerate trailing junk after End
-			}
-			if hasContent(sec.body) {
-				l := sec.body[0]
-				return nil, errAt(l.no, 1, "content before Minimize/Maximize header")
-			}
-		case secMin:
-			if senseFound {
-				return nil, errAt(sec.header, 0, "duplicate objective section")
-			}
-			sense = Minimize
-			senseFound = true
-			objSection = sec
-		case secMax:
-			if senseFound {
-				return nil, errAt(sec.header, 0, "duplicate objective section")
-			}
-			sense = Maximize
-			senseFound = true
-			objSection = sec
-		case secST:
-			stSection = sec
-		case secBounds:
-			boundsSection = sec
-		case secGeneral:
-			generalSections = append(generalSections, sec)
-		case secBinary:
-			binarySections = append(binarySections, sec)
-		case secSOS:
-			// Silently skip — grove does not model SOS sets (yet).
-		case secEnd:
-			// Stop looking at further content; LP format sanctions
-			// whatever appears after End.
-			goto done
-		}
-	}
-done:
-
-	if !senseFound {
+	switch firstKind {
+	case secNone:
 		return nil, &ParseError{Msg: "missing Minimize/Maximize section"}
+	case secMin:
+		sense = Minimize
+	case secMax:
+		sense = Maximize
+	default:
+		return nil, errAt(firstHeader, 0, "missing Minimize/Maximize section")
 	}
 
 	prob := NewProblem("", sense)
 	b := &builder{prob: prob, vars: map[string]*Var{}}
 
-	if err := b.parseObjective(objSection); err != nil {
-		return nil, err
-	}
-	if stSection.kind == secST {
-		if err := b.parseConstraints(stSection); err != nil {
-			return nil, err
+	var generalSecs, binarySecs []section
+	curKind := firstKind
+	curHeader := firstHeader
+	for curKind != secEnd {
+		body, nextKind, nextHeader, berr := readSectionBody(ls)
+		if berr != nil {
+			return nil, berr
 		}
-	}
-	if boundsSection.kind == secBounds {
-		if err := b.parseBounds(boundsSection); err != nil {
-			return nil, err
+		sec := section{kind: curKind, header: curHeader, body: body}
+		switch curKind {
+		case secMin, secMax:
+			if err := b.parseObjective(sec); err != nil {
+				return nil, err
+			}
+		case secST:
+			if err := b.parseConstraints(sec); err != nil {
+				return nil, err
+			}
+		case secBounds:
+			if err := b.parseBounds(sec); err != nil {
+				return nil, err
+			}
+		case secGeneral:
+			generalSecs = append(generalSecs, sec)
+		case secBinary:
+			binarySecs = append(binarySecs, sec)
+		case secSOS:
+			// Silently skip — grove does not model SOS sets (yet).
 		}
+
+		if nextKind == secNone || nextKind == secEnd {
+			// Either EOF or an explicit End marker: the LP format
+			// sanctions whatever appears after End, so we stop
+			// reading.
+			break
+		}
+		if nextKind == secMin || nextKind == secMax {
+			return nil, errAt(nextHeader, 0, "duplicate objective section")
+		}
+		curKind = nextKind
+		curHeader = nextHeader
 	}
-	for _, g := range generalSections {
+
+	for _, g := range generalSecs {
 		if err := b.parseVarList(g, Integer); err != nil {
 			return nil, err
 		}
 	}
-	for _, bn := range binarySections {
+	for _, bn := range binarySecs {
 		if err := b.parseVarList(bn, Binary); err != nil {
 			return nil, err
 		}
