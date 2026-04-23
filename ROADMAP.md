@@ -47,7 +47,7 @@ Target: **Q3.** Backwards-compatible additions only. Epic: [#24](https://github.
 - Solution warm-starting: `Solver` interface gains `SolveWith(prob,
   startingBasis)` for re-solving after small model edits.
   ([#4](https://github.com/JakenHerman/grove/issues/4))
-- Presolve pass that drops empty rows/columns and detects fixed
+- [x] Presolve pass that drops empty rows/columns and detects fixed
   variables before the simplex starts.
   ([#5](https://github.com/JakenHerman/grove/issues/5))
 - Constraint validation upgrades: detect duplicates, empty rows,

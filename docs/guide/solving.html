@@ -169,11 +169,12 @@ res, _ := prob.Solve()
       <h2>Solver options</h2>
 
       <p>
-        Two settings live on the <code>Problem</code> itself:
+        Three settings live on the <code>Problem</code> itself:
       </p>
 
 <pre><code class="language-go">prob.Verbose       = true  // stream pivots to stderr (see above)
 prob.MaxIterations = 10000 // hard pivot cap; default is unbounded
+prob.SkipPresolve  = true  // bypass the pre-simplex reduction pass (v0.2)
 </code></pre>
 
       <p>
@@ -183,10 +184,87 @@ prob.MaxIterations = 10000 // hard pivot cap; default is unbounded
       </p>
 
       <p>
-        The third dial is <code>prob.Solver</code> — a slot for an
+        The fourth dial is <code>prob.Solver</code> — a slot for an
         alternative implementation of the <code>grove.Solver</code>
         interface (the pure-Go simplex is the default). That&rsquo;s
         covered in <a href="./file-io.html">File I/O and solvers</a>.
+      </p>
+
+      <h2 id="presolve">Presolve</h2>
+
+      <p>
+        Before the simplex runs, <code>Solve</code> invokes a cheap
+        presolve pass that shrinks the model in three ways:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Fixed variables.</strong> A variable declared with
+          <code>Bounds(c, c)</code> is substituted out: its constant
+          contribution is folded into every constraint&rsquo;s RHS
+          and into the objective constant.
+        </li>
+        <li>
+          <strong>Empty columns.</strong> A variable that — after
+          fixed-variable substitution — appears in no constraint is
+          settled at whichever bound improves the user-sense
+          objective. For a <code>Minimize</code> problem a positive
+          coefficient pins the variable at its lower bound and a
+          negative coefficient pins it at its upper bound; for
+          <code>Maximize</code> the signs flip. A zero coefficient
+          leaves the variable at its lower bound (or the upper bound
+          if the lower is <code>-Inf</code>). If the improving
+          direction is unbounded — for example, a free variable with
+          a nonzero objective coefficient that never appears in a
+          constraint — presolve returns a <code>Result</code> with
+          <code>Status == Unbounded</code> without ever touching the
+          simplex.
+        </li>
+        <li>
+          <strong>Empty rows.</strong> A constraint whose LHS
+          contains only fixed variables collapses to a scalar
+          comparison (e.g. <code>0 ≤ 5</code>). If it is consistent
+          the constraint is dropped and its dual is reported as
+          <code>0</code>; if it is not (<code>0 ≥ 5</code>) presolve
+          returns a <code>Result</code> with
+          <code>Status == Infeasible</code>.
+        </li>
+      </ul>
+
+      <p>
+        Presolve is transparent: it never mutates the
+        <code>Problem</code> you built, and the <code>Result</code>
+        that <code>Solve</code> returns is re-expanded into your
+        original index space. Fixed and empty-column variables
+        carry their settled value on <code>res.Value(v)</code>; dropped
+        constraints carry a zero <code>res.Dual(c)</code>.
+      </p>
+
+      <p>
+        If you need to drive the pass by hand — for debugging, or to
+        inspect the reduced model before it reaches the solver — call
+        <code>Presolve</code> directly:
+      </p>
+
+<pre><code class="language-go">reduced, undo, err := prob.Presolve(nil)
+if err != nil {
+    return err
+}
+if undo.Terminal != grove.NotSolved {
+    // Presolve proved Infeasible / Unbounded / all-fixed-Optimal
+    // before the simplex ever needed to run.
+    return handleTerminal(undo)
+}
+// ... run reduced.Solve() or inspect reduced.Constraints() ...
+</code></pre>
+
+      <p>
+        Turn presolve off by setting
+        <code>prob.SkipPresolve = true</code>. You almost never
+        want to — the pass is <span class="mono">O(nnz)</span> cheap
+        and frequently saves the simplex a handful of degenerate
+        pivots — but the dial exists for anyone comparing grove
+        against a reference that solves the unreduced model.
       </p>
 
       <h2>Errors vs. logical outcomes</h2>

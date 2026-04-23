@@ -258,6 +258,15 @@ type Problem struct {
 	// MaxIterations caps the simplex iteration count. Zero means
 	// "use the solver default".
 	MaxIterations int
+
+	// SkipPresolve disables the pre-simplex reduction pass run by
+	// [Problem.Solve]. The presolve pass (added in v0.2) removes
+	// fixed variables, empty columns, and empty rows before the
+	// solver sees the model; it is cheap and safe for well-formed
+	// LPs, but callers debugging the solver or comparing against
+	// external references may want to turn it off. See
+	// [Problem.Presolve].
+	SkipPresolve bool
 }
 
 // NewProblem returns an empty LP with the given name and optimization sense.
@@ -492,11 +501,39 @@ func (p *Problem) Solve() (*Result, error) {
 	if err := p.Validate(); err != nil {
 		return &Result{Status: NotSolved, Message: err.Error()}, err
 	}
-	solver := p.Solver
-	if solver == nil {
-		solver = &SimplexSolver{Verbose: p.Verbose, MaxIterations: p.MaxIterations}
+
+	// Presolve runs by default; SkipPresolve = true bypasses it.
+	target := p
+	var undo *PresolveUndo
+	var res *Result
+	var err error
+	if !p.SkipPresolve {
+		rp, u, perr := p.Presolve(nil)
+		if perr != nil {
+			return &Result{Status: NotSolved, Message: perr.Error()}, perr
+		}
+		undo = u
+		if u.Terminal != NotSolved {
+			// Presolve decided the problem's status on its own; build
+			// the expanded Result from the undo map and fall through to
+			// the shared post-solve section so checks like the ILP
+			// warning apply uniformly.
+			res = u.terminalResult()
+		} else {
+			target = rp
+		}
 	}
-	res, err := solver.Solve(p)
+
+	if res == nil {
+		solver := p.Solver
+		if solver == nil {
+			solver = &SimplexSolver{Verbose: p.Verbose, MaxIterations: p.MaxIterations}
+		}
+		res, err = solver.Solve(target)
+		if undo != nil {
+			res = undo.expand(res)
+		}
+	}
 	if res != nil && res.Status == Optimal {
 		if off := res.NonIntegerIntegerVars(p); len(off) > 0 {
 			w := fmt.Sprintf("%s: %d integer/binary variable(s) came back non-integer "+
