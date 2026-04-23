@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Introduction — grove docs</title>
+<meta name="description" content="Introduction to grove: a pure-Go linear-programming library with an ergonomic modeling DSL, a built-in two-phase simplex solver, and zero CGO." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="index">
+
+      <span class="doc-eyebrow">getting started</span>
+      <h1>Grove, in one sitting.</h1>
+      <p class="doc-lede">
+        grove is a pure-Go linear-programming library. Model an LP with
+        named variables and operator-style constraints, hand it to a
+        built-in two-phase simplex solver, and read back duals and
+        reduced costs — with zero CGO and no system libraries.
+      </p>
+
+      <p>
+        These docs are written to be read in order: each page leaves
+        you with a mental model the next page builds on. If you are
+        already familiar with PuLP or pyomo, you can skim the first
+        two pages and land in <a href="./sensitivity.html">sensitivity</a>
+        and <a href="./integer-variables.html">integer variables</a>,
+        which is where grove&rsquo;s personality actually shows up.
+      </p>
+
+      <h2>What you install</h2>
+
+      <p>
+        grove is a single Go module with no cgo and no transitive
+        dependencies outside the standard library. Go 1.22 or newer.
+      </p>
+
+<pre><code class="language-bash">go get github.com/jakenherman/grove</code></pre>
+
+      <p>
+        That is the entire setup. No <code>apt-get</code>, no
+        <code>brew</code>, no <code>LD_LIBRARY_PATH</code> dance.
+      </p>
+
+      <h2>Your first problem</h2>
+
+      <p>
+        Here is a two-variable shift model from the package README.
+        Reading it top-to-bottom gives you the shape of every grove
+        program: create a <code>Problem</code>, declare variables, set
+        the objective, add constraints, call <code>Solve</code>.
+      </p>
+
+<pre><code class="language-go">package main
+
+import (
+    "fmt"
+
+    "github.com/jakenherman/grove"
+)
+
+func main() {
+    prob := grove.NewProblem("nurses", grove.Maximize)
+
+    day   := prob.NewVar("day",   grove.Continuous, grove.Bounds(0, grove.Inf))
+    night := prob.NewVar("night", grove.Continuous, grove.Bounds(0, grove.Inf))
+
+    prob.SetObjective(grove.Expr{day: 1, night: 1})
+    prob.AddConstraint("day_min",   grove.Expr{day: 1},                 grove.GTE, 4)
+    prob.AddConstraint("night_min", grove.Expr{night: 1},               grove.GTE, 2)
+    prob.AddConstraint("budget",    grove.Expr{day: 1200, night: 1500}, grove.LTE, 18000)
+
+    res, err := prob.Solve()
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(res.Status, res.Objective)
+    fmt.Println("day:",   res.Value(day))
+    fmt.Println("night:", res.Value(night))
+}
+</code></pre>
+
+      <p>Running it prints:</p>
+
+<pre><code>Optimal 14.5
+day: 12.5
+night: 2
+</code></pre>
+
+      <p>
+        Everything else in these docs is a deeper look at one piece
+        of the above: how to build a <a href="./modeling.html">bigger
+        model</a>, how to <a href="./solving.html">read the result
+        object</a>, what the numbers in the
+        <a href="./sensitivity.html">sensitivity report</a> mean, and
+        the one surprise you must know about if you declare variables
+        as <a href="./integer-variables.html">Integer or Binary</a>
+        before branch-and-bound lands in v0.4.
+      </p>
+
+      <h2>What is (and is not) in v0.1</h2>
+
+      <div class="callout">
+        <span class="callout-label">✔ Supported today</span>
+        <ul>
+          <li>Continuous LPs with arbitrary (finite or infinite) bounds.</li>
+          <li>LTE, GTE, and EQ constraints; free variables.</li>
+          <li>Two-phase simplex with Bland&rsquo;s anti-cycling rule.</li>
+          <li>Duals, reduced costs, slacks, and a structured sensitivity report.</li>
+          <li>CPLEX-LP and MPS export.</li>
+        </ul>
+      </div>
+
+      <div class="callout callout-warn">
+        <span class="callout-label">△ Coming later</span>
+        <ul>
+          <li><strong>True MIP</strong> via branch-and-bound — scheduled for v0.4. Until then, <code>Integer</code>/<code>Binary</code> variables are <em>solved as their LP relaxation</em>, with a post-solve warning. See <a href="./integer-variables.html">Integer variables</a>.</li>
+          <li><strong>HiGHS backend</strong> behind a build tag — v0.3.</li>
+          <li><strong>Reading</strong> <code>.lp</code>/<code>.mps</code> files (writing ships in v0.1) — v0.2.</li>
+        </ul>
+      </div>
+
+      <h2>Where to go next</h2>
+
+      <ul>
+        <li><a href="./modeling.html">Problems, variables, constraints</a> — the whole modeling DSL on one page.</li>
+        <li><a href="./solving.html">Solve and Result</a> — the shape of the thing you get back.</li>
+        <li><a href="./examples.html">Examples</a> — three fully worked models you can run.</li>
+      </ul>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

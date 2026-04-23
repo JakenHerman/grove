@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API reference — grove docs</title>
+<meta name="description" content="Complete public API for the grove package: types, functions, and constants exported from github.com/jakenherman/grove." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="api-reference">
+
+      <span class="doc-eyebrow">reference</span>
+      <h1>API reference.</h1>
+      <p class="doc-lede">
+        The complete public surface of the <code>grove</code> package
+        as of v0.1. Items are grouped by type; within each type,
+        fields and methods appear in declaration order. For the
+        always-current view, see
+        <a href="https://pkg.go.dev/github.com/jakenherman/grove">pkg.go.dev</a>.
+      </p>
+
+      <h2>Constants and package-level vars</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">var Inf float64</span>
+          <p>Positive infinity (<code>math.Inf(1)</code>). Pass as either end of <code>Bounds</code> for an unbounded side. Use <code>-grove.Inf</code> for a free left side.</p>
+        </div>
+        <div class="def">
+          <span class="sig">const WarnLPRelaxationOnly = "grove: LP-relaxation only"</span>
+          <p>Stable prefix of the warning grove appends to <code>Result.Warnings</code> when an <code>Integer</code>/<code>Binary</code> model was silently solved as its LP relaxation. <code>strings.HasPrefix</code> against this to gate CI.</p>
+        </div>
+        <div class="def">
+          <span class="sig">var ErrHiGHSNotBuilt error</span>
+          <p>Returned by the <code>HiGHS</code> solver stub when the binary wasn&rsquo;t built with <code>-tags highs</code>. Detectable with <code>errors.Is</code>.</p>
+        </div>
+      </div>
+
+      <h2>Sense, VarKind, ConstraintType, Status</h2>
+
+      <p>All four are small <code>int</code>-backed enums with a <code>String</code> method.</p>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">type Sense int</span>
+          <p>Optimization direction. Values: <code>grove.Maximize</code>, <code>grove.Minimize</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type VarKind int</span>
+          <p>Domain of a variable. Values: <code>grove.Continuous</code>, <code>grove.Integer</code>, <code>grove.Binary</code>. The latter two are solved as their LP relaxation in v0.1 — see <a href="./integer-variables.html">Integer variables</a>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type ConstraintType int</span>
+          <p>Relation used by <code>AddConstraint</code>. Values: <code>grove.LTE</code>, <code>grove.GTE</code>, <code>grove.EQ</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type Status int</span>
+          <p>Outcome of a solve. Values: <code>Optimal</code>, <code>Infeasible</code>, <code>Unbounded</code>, <code>IterationLimit</code>, <code>NumericalError</code>, <code>NotSolved</code>.</p>
+        </div>
+      </div>
+
+      <h2>Var</h2>
+
+      <p>
+        A decision variable, created via <code>Problem.NewVar</code>.
+        Don&rsquo;t construct <code>Var</code> values directly.
+      </p>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (v *Var) Name() string</span>
+          <p>The name given at construction.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (v *Var) Kind() VarKind</span>
+          <p>The declared kind.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (v *Var) Low() float64</span>
+          <p>Lower bound. <code>-grove.Inf</code> for a free left side.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (v *Var) High() float64</span>
+          <p>Upper bound. <code>grove.Inf</code> for a free right side.</p>
+        </div>
+      </div>
+
+      <h2>VarOption</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">type VarOption func(*Var)</span>
+          <p>Functional option passed to <code>NewVar</code>. v0.1 exposes exactly one: <code>Bounds</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func Bounds(low, high float64) VarOption</span>
+          <p>Sets the closed interval <code>[low, high]</code>. Use <code>±grove.Inf</code> for open ends.</p>
+        </div>
+      </div>
+
+      <h2>Expr</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">type Expr map[*Var]float64</span>
+          <p>A sparse linear expression. The map is the expression directly; no wrapper type.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (e Expr) Add(other Expr) Expr</span>
+          <p>Adds <code>other</code> into <code>e</code> in place; returns <code>e</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (e Expr) Scale(k float64) Expr</span>
+          <p>Multiplies every coefficient in <code>e</code> by <code>k</code>; returns <code>e</code>.</p>
+        </div>
+      </div>
+
+      <h2>Constraint</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (c *Constraint) Name() string</span>
+          <p>The name given at construction.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (c *Constraint) Expr() Expr</span>
+          <p>The LHS expression.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (c *Constraint) Type() ConstraintType</span>
+          <p>The relation (<code>LTE</code> / <code>GTE</code> / <code>EQ</code>).</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (c *Constraint) RHS() float64</span>
+          <p>The right-hand-side scalar.</p>
+        </div>
+      </div>
+
+      <h2>Problem</h2>
+
+      <p>
+        The root object of a grove model. Construct with
+        <code>NewProblem</code> and attach variables, objective, and
+        constraints before calling <code>Solve</code>.
+      </p>
+
+      <h3>Fields</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">Solver Solver</span>
+          <p>Backend used by <code>Solve</code>. <code>nil</code> ⇒ default pure-Go simplex. Set to <code>&amp;grove.HiGHS{}</code> for the HiGHS stub (real backend lands in v0.3).</p>
+        </div>
+        <div class="def">
+          <span class="sig">Verbose bool</span>
+          <p>When true, streams Phase I/II pivot detail to <code>stderr</code>. Off by default.</p>
+        </div>
+        <div class="def">
+          <span class="sig">MaxIterations int</span>
+          <p>Hard pivot cap. <code>0</code> (the default) means &ldquo;use the solver default&rdquo; — effectively unbounded.</p>
+        </div>
+      </div>
+
+      <h3>Construction</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func NewProblem(name string, sense Sense) *Problem</span>
+          <p>Returns a fresh <code>*Problem</code>. <code>name</code> is used in error messages, exports, and the sensitivity report.</p>
+        </div>
+      </div>
+
+      <h3>Read-only accessors</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (p *Problem) Name() string</span>
+          <p>Problem name.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Sense() Sense</span>
+          <p>Optimization direction.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Vars() []*Var</span>
+          <p>All variables, in declaration order.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Constraints() []*Constraint</span>
+          <p>All constraints, in declaration order.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Objective() Expr</span>
+          <p>The objective expression.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) ObjectiveConstant() float64</span>
+          <p>The constant offset (<code>0</code> unless set explicitly).</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) VarByName(name string) *Var</span>
+          <p>Lookup; <code>nil</code> if not found.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) ConstraintByName(name string) *Constraint</span>
+          <p>Lookup; <code>nil</code> if not found.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) String() string</span>
+          <p>Human-readable summary of the whole model — useful for logging or test assertions.</p>
+        </div>
+      </div>
+
+      <h3>Mutators</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (p *Problem) NewVar(name string, kind VarKind, opts ...VarOption) *Var</span>
+          <p>Creates a variable on this problem and returns its handle. Names must be unique per problem.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) SetObjective(e Expr)</span>
+          <p>Sets the objective expression. Every <code>*Var</code> key in <code>e</code> must belong to this problem.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) SetObjectiveConstant(k float64)</span>
+          <p>Sets the fixed constant added to the objective.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) AddConstraint(name string, e Expr, ctype ConstraintType, rhs float64) *Constraint</span>
+          <p>Appends a constraint and returns its handle. Names must be unique per problem.</p>
+        </div>
+      </div>
+
+      <h3>Validation &amp; solving</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (p *Problem) Validate() error</span>
+          <p>Runs the sanity checks (non-empty variables/constraints, unique names, no inverted <code>Bounds</code>, non-nil objective, no cross-problem <code>*Var</code>s). Automatically invoked at the top of <code>Solve</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Solve() (*Result, error)</span>
+          <p>Runs <code>p.Solver</code> (or the default simplex). Returns <code>(*Result, nil)</code> for any logical outcome including <code>Infeasible</code>/<code>Unbounded</code>; non-nil <code>error</code> is reserved for structural model mistakes. See <a href="./solving.html">Solve and Result</a>.</p>
+        </div>
+      </div>
+
+      <h3>File I/O</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (p *Problem) WriteLP(w io.Writer) error</span>
+          <p>Writes the problem in CPLEX-LP format.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) WriteMPS(w io.Writer) error</span>
+          <p>Writes the problem in fixed-column MPS format.</p>
+        </div>
+      </div>
+
+      <h2>Result</h2>
+
+      <h3>Fields</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">Status Status</span>
+          <p>Outcome classification. Always set.</p>
+        </div>
+        <div class="def">
+          <span class="sig">Objective float64</span>
+          <p>Objective value in the user-facing sense. Valid when <code>Status == Optimal</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">Iterations int</span>
+          <p>Total simplex pivots across Phase I and Phase II.</p>
+        </div>
+        <div class="def">
+          <span class="sig">Message string</span>
+          <p>Optional human-readable detail. Includes the LP-relaxation warning when applicable.</p>
+        </div>
+        <div class="def">
+          <span class="sig">Warnings []string</span>
+          <p>Advisory notes. v0.1 emits exactly one kind (<code>WarnLPRelaxationOnly</code>).</p>
+        </div>
+      </div>
+
+      <h3>Accessor methods</h3>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func (r *Result) Value(v *Var) float64</span>
+          <p>Value of <code>v</code> in the optimal solution, in the original (un-shifted, un-split) variable. <code>0</code> on non-<code>Optimal</code> results.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (r *Result) Values() map[*Var]float64</span>
+          <p>The full primal solution map. Safe to iterate.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (r *Result) Dual(c *Constraint) float64</span>
+          <p>Shadow price of <code>c</code>: the rate at which the optimal objective changes with the constraint&rsquo;s RHS.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (r *Result) Reduced(v *Var) float64</span>
+          <p>Reduced cost of <code>v</code>: per-unit objective change if <code>v</code> were forced into the basis. Zero on basic variables at a non-degenerate optimum.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (r *Result) NonIntegerIntegerVars(p *Problem) []*Var</span>
+          <p>Integer/Binary variables whose optimum came back non-integer (within a <code>1e-6</code> tolerance). <code>nil</code> if the problem is all-continuous or the solve was not <code>Optimal</code>.</p>
+        </div>
+      </div>
+
+      <h2>Sensitivity</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">func SensitivityReport(p *Problem, r *Result) *Sensitivity</span>
+          <p>Builds a structured sensitivity snapshot from a solved problem. Returns <code>nil</code> if <code>r.Status != Optimal</code>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type Sensitivity struct {
+  Constraints []ConstraintSensitivity
+  Variables   []VarSensitivity
+}</span>
+          <p>Constraints and variables in declaration order. Use <code>.String()</code> for a pretty-printed block.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type ConstraintSensitivity struct {
+  Constraint *Constraint
+  LHS        float64 // a·x at the optimum
+  Slack      float64 // LTE: b − a·x; GTE: a·x − b; EQ: 0
+  Dual       float64 // ∂z*/∂rhs
+  Binding    bool    // Slack ≈ 0
+}</span>
+          <p>Per-constraint diagnostics block.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type VarSensitivity struct {
+  Var     *Var
+  Value   float64
+  Reduced float64
+  AtLower bool
+  AtUpper bool
+}</span>
+          <p>Per-variable diagnostics block. <code>AtLower</code>/<code>AtUpper</code> indicate which bound the variable sits on, if any.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (s *Sensitivity) String() string</span>
+          <p>Pretty-printed report grouped into binding constraints, slack constraints, and variables.</p>
+        </div>
+      </div>
+
+      <h2>Solver interface</h2>
+
+      <div class="def-grid">
+        <div class="def">
+          <span class="sig">type Solver interface {
+  Solve(p *Problem) (*Result, error)
+}</span>
+          <p>The single extension point. Assign any implementation to <code>Problem.Solver</code> and it will be used in place of the default simplex.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type SimplexSolver struct {
+  Verbose       bool
+  MaxIterations int
+}</span>
+          <p>The default pure-Go simplex. You rarely construct this yourself — setting <code>Problem.Verbose</code> and <code>Problem.MaxIterations</code> forwards into a freshly-built instance.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type HiGHS struct{ /* opaque */ }</span>
+          <p>CGO-linked HiGHS backend. In v0.1, <code>Solve</code> returns <code>ErrHiGHSNotBuilt</code>; a real implementation ships behind <code>-tags highs</code> in v0.3.</p>
+        </div>
+      </div>
+
+      <h2>Versioning promise</h2>
+
+      <p>
+        Pre-1.0 minor versions (0.1 → 0.2 → 0.3 → 0.4) are permitted
+        to break the API as the design settles. All breakages will
+        be called out in the release notes. The intent is that the
+        <em>modeling layer</em> (<code>Problem</code>,
+        <code>Var</code>, <code>Expr</code>, <code>Constraint</code>,
+        <code>Result</code>, <code>Solver</code>) freezes at v1.0.
+        See the <a href="./roadmap.html">roadmap</a>.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

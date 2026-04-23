@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sensitivity analysis — grove docs</title>
+<meta name="description" content="Duals, reduced costs, and grove.SensitivityReport explained." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="sensitivity">
+
+      <span class="doc-eyebrow">solving</span>
+      <h1>Sensitivity analysis.</h1>
+      <p class="doc-lede">
+        The <em>optimum</em> of an LP is the least interesting thing
+        the solver computes. The interesting numbers are the duals
+        and reduced costs — they tell you how your optimum moves if
+        the world changes. grove exposes both by default.
+      </p>
+
+      <h2>Why you care</h2>
+
+      <p>
+        Consider the budget constraint from the scheduling example:
+      </p>
+
+<pre><code class="language-go">budget := prob.AddConstraint(
+    "budget",
+    grove.Expr{day: 1200, night: 1500},
+    grove.LTE,
+    18000,
+)
+</code></pre>
+
+      <p>
+        After <code>Solve</code> returns <code>Optimal</code>, you
+        know how many shifts to staff. But you don&rsquo;t yet know
+        the question your CFO will ask next, which is:
+        &ldquo;what happens if I give you another thousand
+        dollars?&rdquo;. The dual value of <code>budget</code>
+        answers that question, exactly, in the objective&rsquo;s
+        units, and costs you nothing to compute — grove has already
+        computed it during the solve.
+      </p>
+
+      <h2>Shadow prices (duals)</h2>
+
+      <p>
+        The <em>shadow price</em> of a constraint is the rate of
+        change of the optimal objective as you loosen the
+        constraint&rsquo;s right-hand side by one unit. Formally, for
+        a constraint <code>c</code> with RHS <code>b</code> and
+        optimal objective <code>z*</code>:
+      </p>
+
+<pre><code>dual(c) = ∂z* / ∂b</code></pre>
+
+      <p>
+        Read it back from the result:
+      </p>
+
+<pre><code class="language-go">fmt.Println(res.Dual(budget))   // e.g. 0.000833  (one extra dollar of budget → 0.000833 extra units of objective)
+</code></pre>
+
+      <p>
+        Two practical interpretations:
+      </p>
+
+      <ul>
+        <li>A <strong>non-zero dual</strong> means the constraint is <em>binding</em> — it is exactly satisfied at the optimum, and you would do better if it were looser.</li>
+        <li>A <strong>zero dual</strong> means the constraint has <em>slack</em> at the optimum — you have more of that resource than you&rsquo;re using, so loosening it further changes nothing.</li>
+      </ul>
+
+      <p>
+        For a capacity planner, the dual <em>is</em> the answer to
+        &ldquo;where is the bottleneck, and what is the next dollar
+        of capacity worth?&rdquo; That single number per constraint
+        is worth more than all the primal values combined.
+      </p>
+
+      <h3>Sense and sign</h3>
+
+      <p>
+        grove returns duals in the user-facing sense. For a
+        <code>Maximize</code> problem, the dual of an <code>LTE</code>
+        constraint is ≥ 0 at an optimum and the dual of a
+        <code>GTE</code> is ≤ 0 (loosening an LTE can only help you;
+        loosening a GTE can only hurt). <code>EQ</code> duals are
+        signed according to which side of the equality is binding.
+        You don&rsquo;t have to remember any of this — just read the
+        sign.
+      </p>
+
+      <h2>Reduced costs</h2>
+
+      <p>
+        The <em>reduced cost</em> of a variable is the answer to a
+        symmetric question: &ldquo;how much would the objective
+        change per unit I forced this variable to take on, if it is
+        not already in the basis?&rdquo;. For a
+        variable currently at zero (a <em>non-basic</em> variable),
+        the reduced cost tells you how much worse the objective gets
+        per unit you forced it upward:
+      </p>
+
+<pre><code class="language-go">fmt.Println(res.Reduced(overnight_shift))
+// -12.5  →  forcing overnight_shift = 1 costs 12.5 units of objective
+</code></pre>
+
+      <p>
+        A <strong>basic variable</strong> (one taking a positive
+        value at the optimum) always has reduced cost zero; that
+        is the optimality condition.
+      </p>
+
+      <p>
+        A <strong>non-basic variable</strong> with a &ldquo;good&rdquo;
+        sign of reduced cost (negative for max, positive for min) has
+        the property that bringing it into the basis would improve
+        the objective — if it did, the simplex would still be
+        pivoting. At the optimum, every non-basic variable has a
+        &ldquo;bad&rdquo; sign or zero.
+      </p>
+
+      <p>
+        Zero reduced cost on a non-basic variable is the simplex&rsquo;s
+        way of telling you there are <em>alternative optima</em> —
+        a whole face of the polytope where the objective takes the
+        same value.
+      </p>
+
+      <h2>The structured report</h2>
+
+      <p>
+        For a quick human-readable summary, grove ships a report
+        printer:
+      </p>
+
+<pre><code class="language-go">rep := grove.SensitivityReport(prob, res)
+fmt.Println(rep)
+</code></pre>
+
+      <p>
+        It prints two tables — one row per constraint, one row per
+        variable — each with the primal values and the dual / reduced
+        cost numbers side by side:
+      </p>
+
+<pre><code>Constraints
+  name                       lhs        rhs        slack       dual    binding
+  day_min                   12.5 GTE       4        8.5          0    false
+  night_min                    2 GTE       2          0          1     true
+  budget                   18000 LTE   18000          0   0.000833     true
+Variables
+  name                        value     reduced    bound-status
+  day                          12.5          0     at lower
+  night                           2          0     at lower
+</code></pre>
+
+      <p>
+        The numbers depend on the model; the shape is always this.
+        If you want the data instead of the prose,
+        <code>SensitivityReport</code> returns a
+        <code>*Sensitivity</code> whose fields are flat slices:
+      </p>
+
+<pre><code class="language-go">type Sensitivity struct {
+    Constraints []ConstraintSensitivity // one entry per constraint, with a Binding bool
+    Variables   []VarSensitivity        // one entry per variable
+}
+</code></pre>
+
+      <p>
+        The <code>String</code> method you see above is just a pretty
+        printer over those slices — filter them yourself for the
+        dashboard shape you want.
+      </p>
+
+      <h2>A worked example</h2>
+
+      <p>
+        Given the nurse model, say the CFO finds another $2,000 in
+        the couch cushions. Before grove was in the picture, you
+        would re-solve. You don&rsquo;t have to:
+      </p>
+
+<pre><code class="language-go">extraBudget := 2000.0
+deltaZ      := res.Dual(budget) * extraBudget
+fmt.Printf("With +$%v of budget, z* increases by %.3f\n", extraBudget, deltaZ)
+</code></pre>
+
+      <p>
+        The caveat: this linearisation is only exact <em>within the
+        range where the current basis stays optimal</em>. If you
+        hand the CFO&rsquo;s grant into the model and re-solve, at
+        some point a different constraint starts binding and the
+        dual jumps. v0.1 doesn&rsquo;t report the basis-stability
+        range; that ships in v0.2 (see the
+        <a href="./roadmap.html">roadmap</a>). For small perturbations
+        the dual is correct.
+      </p>
+
+      <h2>What grove does not report (yet)</h2>
+
+      <p>
+        Three things are on the roadmap but not in v0.1:
+      </p>
+
+      <ul>
+        <li>Per-coefficient ranges over which the current basis stays optimal (sensitivity of the <em>objective</em> to the objective coefficient of each variable).</li>
+        <li>Per-RHS ranges over which each constraint&rsquo;s dual stays constant.</li>
+        <li>Parametric sensitivity of duals to simultaneous RHS changes.</li>
+      </ul>
+
+      <p>
+        If you need any of the above today, the <code>WriteMPS</code>
+        exporter gives you a model you can pipe into a ranging-capable
+        solver (GLPK&rsquo;s <code>glpsol --ranges</code>, or HiGHS).
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

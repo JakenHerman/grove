@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Solve and Result — grove docs</title>
+<meta name="description" content="Calling prob.Solve(), inspecting the Result, status codes, verbose mode, solver options." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="solving">
+
+      <span class="doc-eyebrow">solving</span>
+      <h1>Solve and <em>Result</em>.</h1>
+      <p class="doc-lede">
+        <code>prob.Solve()</code> returns a <code>(*Result, error)</code>.
+        The error is non-nil only for configuration mistakes; logical
+        outcomes live on the <code>Result</code>. Understanding that
+        split — and the fields of <code>Result</code> — is most of
+        using grove in production.
+      </p>
+
+      <h2>Calling Solve</h2>
+
+<pre><code class="language-go">res, err := prob.Solve()
+if err != nil {
+    // You built something structurally wrong: no objective, a Var
+    // from a different Problem, inverted Bounds, etc.
+    return fmt.Errorf("grove: bad model: %w", err)
+}
+switch res.Status {
+case grove.Optimal:
+    // Normal path.
+case grove.Infeasible, grove.Unbounded:
+    // Model is self-contradictory or open. Handle.
+case grove.IterationLimit, grove.NumericalError:
+    // Solver gave up. Try p.MaxIterations, or re-check the data.
+}
+</code></pre>
+
+      <p>
+        This distinction matters: an &ldquo;infeasible&rdquo; LP isn&rsquo;t
+        a bug, it&rsquo;s information. grove returns
+        <code>(res, nil)</code> with <code>res.Status ==
+        Infeasible</code> so you can treat it like any other outcome.
+        Only genuine misuse — no variables, no objective, a
+        <code>*Var</code> that isn&rsquo;t part of this problem —
+        surfaces as a non-nil <code>error</code>.
+      </p>
+
+      <h2>The Result object</h2>
+
+      <p>
+        <code>Result</code> is a plain struct with accessor methods
+        for the map-backed fields. In full:
+      </p>
+
+<pre><code class="language-go">type Result struct {
+    Status     grove.Status  // Optimal / Infeasible / Unbounded / IterationLimit / NumericalError / NotSolved
+    Objective  float64       // Evaluated in the user-facing sense (Maximize returns positive values)
+    Iterations int           // Total simplex pivots, Phase I + Phase II
+    Message    string        // Optional human-readable detail (failures, LP-relaxation caveat)
+    Warnings   []string      // Advisory notes; v0.1 emits WarnLPRelaxationOnly when an ILP was silently relaxed
+
+    // Accessor methods read the internal maps:
+    //   Value(v)   float64   value of variable v
+    //   Dual(c)    float64   shadow price of constraint c (∂z*/∂rhs)
+    //   Reduced(v) float64   reduced cost of variable v
+    //   NonIntegerIntegerVars(p) []*Var  integer/binary vars whose LP optimum is non-integer
+}
+</code></pre>
+
+      <h3>Status</h3>
+
+      <p>
+        <code>grove.Status</code> is a small enum with a
+        <code>String</code> method, so <code>fmt.Println(res.Status)</code>
+        prints a readable label. The values:
+      </p>
+
+      <ul>
+        <li><code>Optimal</code> — the returned vertex is feasible and optimal.</li>
+        <li><code>Infeasible</code> — no feasible solution exists. Phase I couldn&rsquo;t drive the artificials to zero.</li>
+        <li><code>Unbounded</code> — there is a direction in which the objective can improve without limit. grove detects this during Phase II ratio tests.</li>
+        <li><code>IterationLimit</code> — the solver hit <code>p.MaxIterations</code> before converging. Default is effectively unbounded; set it only when you want a timeout.</li>
+        <li><code>NumericalError</code> — the simplex produced values grove can&rsquo;t trust (typically a NaN or a blow-up from extreme coefficient ratios). Try scaling your data.</li>
+        <li><code>NotSolved</code> — returned inside error-return paths; you&rsquo;ll see this with <code>err != nil</code>.</li>
+      </ul>
+
+      <h3>Objective and variable values</h3>
+
+<pre><code class="language-go">fmt.Println("objective:", res.Objective)
+for _, v := range []*grove.Var{day, night} {
+    fmt.Printf("%-6s %g\n", v.Name()+":", res.Value(v))
+}
+</code></pre>
+
+      <p>
+        <code>res.Objective</code> is already reported in your
+        original sense — if you said <code>Maximize</code>, you&rsquo;ll
+        see a positive number for a maximisation problem, not the
+        negated internal form. Same for <code>res.Value(v)</code>:
+        bounded-variable substitutions are un-applied before the
+        number reaches you.
+      </p>
+
+      <p>
+        Asking for a variable that doesn&rsquo;t belong to the
+        problem returns <code>0</code>. Asking for a variable on a
+        non-<code>Optimal</code> result also returns <code>0</code>.
+      </p>
+
+      <h2>Verbose mode</h2>
+
+      <p>
+        When a solve is misbehaving the fastest way to see what the
+        simplex is doing is to turn on verbose logging:
+      </p>
+
+<pre><code class="language-go">prob.Verbose = true
+res, _ := prob.Solve()
+</code></pre>
+
+      <p>
+        The solver will stream, to <code>stderr</code>:
+      </p>
+
+      <ul>
+        <li>The standard-form tableau immediately after construction (with artificial columns flagged).</li>
+        <li>Each Phase I pivot, showing entering column, leaving row, and the resulting artificial-sum residual.</li>
+        <li>Each Phase II pivot.</li>
+        <li>The final basis and the reason the solver stopped.</li>
+      </ul>
+
+      <p>
+        For a 2-variable test problem this is three screenfuls. For
+        anything bigger, pipe it into a file — the output is
+        genuinely diagnostic, but it isn&rsquo;t a thing you leave on.
+      </p>
+
+      <h2>Solver options</h2>
+
+      <p>
+        Two settings live on the <code>Problem</code> itself:
+      </p>
+
+<pre><code class="language-go">prob.Verbose       = true  // stream pivots to stderr (see above)
+prob.MaxIterations = 10000 // hard pivot cap; default is unbounded
+</code></pre>
+
+      <p>
+        Use <code>MaxIterations</code> when you&rsquo;re running
+        grove inside a request handler and you want a fixed
+        worst-case budget rather than a wall-clock timeout.
+      </p>
+
+      <p>
+        The third dial is <code>prob.Solver</code> — a slot for an
+        alternative implementation of the <code>grove.Solver</code>
+        interface (the pure-Go simplex is the default). That&rsquo;s
+        covered in <a href="./file-io.html">File I/O and solvers</a>.
+      </p>
+
+      <h2>Errors vs. logical outcomes</h2>
+
+      <p>
+        To summarise the contract:
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Situation</th><th>Return</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Model is fine and has a solution</td><td><code>(res, nil)</code>, <code>res.Status == Optimal</code></td></tr>
+          <tr><td>Model is fine but infeasible</td><td><code>(res, nil)</code>, <code>res.Status == Infeasible</code></td></tr>
+          <tr><td>Model is fine but unbounded</td><td><code>(res, nil)</code>, <code>res.Status == Unbounded</code></td></tr>
+          <tr><td>Ran out of iteration budget</td><td><code>(res, nil)</code>, <code>res.Status == IterationLimit</code></td></tr>
+          <tr><td>Numerical breakdown (NaN, blow-up)</td><td><code>(res, nil)</code>, <code>res.Status == NumericalError</code></td></tr>
+          <tr><td>Model itself is structurally invalid</td><td><code>(res, err)</code>, <code>res.Status == NotSolved</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        In practice this means you <em>always</em> check
+        <code>err</code> first, then switch on <code>res.Status</code>.
+        Don&rsquo;t early-return on <code>err != nil</code> and skip
+        the <code>Infeasible</code> case — infeasibility is almost
+        always a result you want to report to the human running the
+        model, not a panic.
+      </p>
+
+      <h2>A note on determinism</h2>
+
+      <p>
+        grove&rsquo;s simplex uses Bland&rsquo;s rule for pivot
+        selection, which guarantees termination on degenerate
+        problems. A useful side-effect is that the number of
+        iterations is <em>deterministic</em> for a given model —
+        identical inputs give identical <code>res.Iterations</code>.
+        If you see an iteration count change between runs without a
+        model change, something else is varying (map iteration order
+        if you&rsquo;re building <code>Expr</code> from a map,
+        typically).
+      </p>
+
+      <p>
+        With a result in hand, the next question is usually
+        &ldquo;what do the numbers <em>mean</em>?&rdquo; — which is
+        exactly the sensitivity chapter.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

@@ -61,6 +61,13 @@ go get github.com/jakenherman/grove
 
 That's the entire setup. Go 1.22+, no cgo, no `LD_LIBRARY_PATH` dance.
 
+## Documentation
+
+Narrative docs live at <https://jakenherman.github.io/grove/guide/>, with
+one page per topic (modeling, solving, sensitivity, integer variables,
+file I/O, a full API reference, and the roadmap). The `README` you're
+reading is the pitch; the site is the reference.
+
 ## ⚠️ Integer variables in v0.1 are solved as their LP relaxation
 
 grove v0.1 has a pure-LP solver. If you declare a variable as `grove.Integer`

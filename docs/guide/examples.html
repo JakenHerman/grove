@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Examples — grove docs</title>
+<meta name="description" content="Three worked grove models: shift scheduling, VM resource allocation, Stigler diet." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="examples">
+
+      <span class="doc-eyebrow">reference</span>
+      <h1>Worked examples.</h1>
+      <p class="doc-lede">
+        Three self-contained programs under
+        <a href="https://github.com/jakenherman/grove/tree/main/examples"><code>examples/</code></a>.
+        Each is runnable with <code>go run ./examples/&lt;name&gt;</code>.
+        Read them top to bottom and you&rsquo;ve seen almost every
+        feature of the library used in anger.
+      </p>
+
+      <h2>1. Shift scheduling</h2>
+
+      <p>
+        Cover seven days of nurse demand at minimum total wage cost,
+        choosing how many full-time and part-time nurses to staff on
+        each day. Full shifts are 8 hours at $280; part shifts are
+        4 hours at $160. Saturday and Sunday have a labour-rules cap
+        on part-time staffing.
+      </p>
+
+      <p>
+        The shape of the model is &ldquo;two variables per day, one
+        coverage constraint per day, two cap constraints&rdquo; — 14
+        variables, 9 constraints. Run it:
+      </p>
+
+<pre><code class="language-bash">go run ./examples/scheduling</code></pre>
+
+      <p>And the core of <code>main.go</code>:</p>
+
+<pre><code class="language-go">prob := grove.NewProblem("nurse_schedule", grove.Minimize)
+
+full := make([]*grove.Var, len(days))
+part := make([]*grove.Var, len(days))
+for i, d := range days {
+    full[i] = prob.NewVar("full_"+d, grove.Continuous, grove.Bounds(0, grove.Inf))
+    part[i] = prob.NewVar("part_"+d, grove.Continuous, grove.Bounds(0, grove.Inf))
+}
+
+obj := grove.Expr{}
+for i := range days {
+    obj[full[i]] = fullCost  // $280 per full shift
+    obj[part[i]] = partCost  // $160 per part shift
+}
+prob.SetObjective(obj)
+
+for i, d := range days {
+    prob.AddConstraint("cover_"+d,
+        grove.Expr{full[i]: fullHours, part[i]: partHours},
+        grove.GTE, demand[i])
+}
+prob.AddConstraint("part_cap_sat", grove.Expr{part[5]: 1}, grove.LTE, 4)
+prob.AddConstraint("part_cap_sun", grove.Expr{part[6]: 1}, grove.LTE, 4)
+</code></pre>
+
+      <p>
+        The output is a cost and a staffing schedule plus shadow
+        prices per day — those duals tell you what another nurse-hour
+        of demand would cost you, which is what you quote to your
+        capacity planner.
+      </p>
+
+      <p>
+        Things to try: change <code>part_cap_sat</code> to
+        <code>grove.LTE, 0</code> and watch the weekend cost jump;
+        set a demand value high enough that <code>Infeasible</code>
+        fires; turn on <code>prob.Verbose = true</code> and watch the
+        simplex pivot through Phase II.
+      </p>
+
+      <h2>2. VM resource allocation</h2>
+
+      <p>
+        The LP relaxation of a multi-dimensional knapsack. Given a
+        fixed CPU/RAM/disk budget and a set of workloads with
+        per-workload resource demands and per-workload business
+        value, choose a fraction of each workload to schedule to
+        maximise total value.
+      </p>
+
+<pre><code class="language-bash">go run ./examples/allocation</code></pre>
+
+      <p>
+        The model is small and mechanical — one variable per
+        workload, one constraint per resource dimension:
+      </p>
+
+<pre><code class="language-go">prob := grove.NewProblem("vm_allocation", grove.Maximize)
+
+frac := make([]*grove.Var, len(workloads))
+for i, w := range workloads {
+    frac[i] = prob.NewVar(w.name, grove.Continuous, grove.Bounds(0, 1))
+}
+
+obj := grove.Expr{}
+for i, w := range workloads {
+    obj[frac[i]] = w.value
+}
+prob.SetObjective(obj)
+
+cpuExpr, ramExpr, diskExpr := grove.Expr{}, grove.Expr{}, grove.Expr{}
+for i, w := range workloads {
+    cpuExpr[frac[i]]  = w.cpu
+    ramExpr[frac[i]]  = w.ram
+    diskExpr[frac[i]] = w.disk
+}
+prob.AddConstraint("cpu",  cpuExpr,  grove.LTE, cluster.cpu)
+prob.AddConstraint("ram",  ramExpr,  grove.LTE, cluster.ram)
+prob.AddConstraint("disk", diskExpr, grove.LTE, cluster.disk)
+</code></pre>
+
+      <p>
+        The <em>real</em> point of this model is the sensitivity
+        output: the dual on the binding resource is exactly what an
+        extra unit of that resource is worth in dollars. If CPU is
+        binding and its dual is $4.50/vCPU, then buying vCPU at
+        anything below $4.50/hr is a good deal; above that, you
+        should be buying RAM or disk instead.
+      </p>
+
+      <p>
+        Because the variables are <code>Continuous</code>, the model
+        permits fractional workloads. In reality you want whole ones,
+        which is the MIP version — that lands in v0.4 (see
+        <a href="./integer-variables.html">Integer variables</a>).
+        Until then the LP is a useful <em>upper bound</em> and
+        priority signal.
+      </p>
+
+      <h2>3. Stigler diet</h2>
+
+      <p>
+        The original LP. In 1945 the economist George Stigler asked
+        &ldquo;what is the cheapest combination of foods that meets
+        a human&rsquo;s daily nutritional needs?&rdquo; and worked out
+        the answer by hand. His paper is widely credited as one of the
+        LPs that motivated Dantzig to invent the simplex method.
+      </p>
+
+<pre><code class="language-bash">go run ./examples/diet</code></pre>
+
+      <p>
+        grove&rsquo;s reproduction uses ten modern foods, five
+        nutrient requirements (minimum calories, protein, fat, carbs;
+        maximum sodium), and a cost objective. Each variable is
+        grams of a given food, bounded to a realistic daily range.
+      </p>
+
+<pre><code class="language-go">prob := grove.NewProblem("diet", grove.Minimize)
+
+x := make([]*grove.Var, len(foods))
+for i, f := range foods {
+    x[i] = prob.NewVar(f.name, grove.Continuous, grove.Bounds(0, 2000))
+}
+
+obj := grove.Expr{}
+for i, f := range foods {
+    obj[x[i]] = f.costPerKG / 1000.0 // per gram
+}
+prob.SetObjective(obj)
+
+prob.AddConstraint("calories_min", caloriesExpr, grove.GTE, 2000)
+prob.AddConstraint("protein_min",  proteinExpr,  grove.GTE, 50)
+prob.AddConstraint("fat_min",      fatExpr,      grove.GTE, 30)
+prob.AddConstraint("carbs_min",    carbsExpr,    grove.GTE, 200)
+prob.AddConstraint("sodium_max",   sodiumExpr,   grove.LTE, 2300)
+
+res, _ := prob.Solve()
+fmt.Println(grove.SensitivityReport(prob, res))
+</code></pre>
+
+      <p>
+        Running it faithfully reproduces the shape of Stigler&rsquo;s
+        historic result (modulo modern food prices): one or two
+        ingredients do almost all the work, and the rest of the
+        basket is boundary-pushed to zero. The report at the end
+        names the binding nutritional constraints and gives you the
+        shadow price of each — i.e. how much cheaper the diet would
+        get per extra allowed gram of sodium, or per relaxed calorie
+        floor.
+      </p>
+
+      <h2>Reading the output of any of them</h2>
+
+      <p>
+        All three examples end the same way: solve, print
+        <code>res.Status</code> and <code>res.Objective</code>, then
+        dump <code>grove.SensitivityReport</code>. That report tells
+        you which constraints are binding, what one more unit of each
+        would buy you, and which variables have non-zero reduced
+        cost. It&rsquo;s the single most useful thing to print when a
+        model ships — more than the primal values themselves.
+      </p>
+
+      <p>
+        The full programs live in the repo:
+      </p>
+
+      <ul>
+        <li><a href="https://github.com/jakenherman/grove/blob/main/examples/scheduling/main.go"><code>examples/scheduling/main.go</code></a></li>
+        <li><a href="https://github.com/jakenherman/grove/blob/main/examples/allocation/main.go"><code>examples/allocation/main.go</code></a></li>
+        <li><a href="https://github.com/jakenherman/grove/blob/main/examples/diet/main.go"><code>examples/diet/main.go</code></a></li>
+      </ul>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

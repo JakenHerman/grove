@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Integer variables — grove docs</title>
+<meta name="description" content="Why grove v0.1 solves Integer and Binary variables as their LP relaxation, the two pitfalls this can cause, and how grove warns you." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="integer-variables">
+
+      <span class="doc-eyebrow">solving</span>
+      <h1>Integer variables.</h1>
+      <p class="doc-lede">
+        This is the single page you must read if you&rsquo;re using
+        grove before v0.4 ships. <code>Integer</code> and
+        <code>Binary</code> variables are accepted by the modeling
+        layer but solved as the LP relaxation. Sometimes that&rsquo;s
+        fine. Sometimes it&rsquo;s silently wrong. Here&rsquo;s how
+        to tell the difference.
+      </p>
+
+      <div class="callout callout-warn">
+        <span class="callout-label">⚠ v0.1 behaviour</span>
+        <p>
+          If you declare <code>grove.Integer</code> or
+          <code>grove.Binary</code> variables, grove will still accept
+          the model and return a result — but internally it is solving
+          the <strong>LP relaxation</strong>. Branch-and-bound MIP
+          support is scheduled for v0.4.
+        </p>
+      </div>
+
+      <h2>What the LP relaxation is</h2>
+
+      <p>
+        Given an integer linear program (ILP), its <em>LP relaxation</em>
+        is the same model with the integrality constraint dropped —
+        <code>x ∈ ℤ</code> becomes <code>x ∈ ℝ</code>. Solving the
+        relaxation is a standard first step in a real MIP algorithm
+        (branch-and-bound uses it as the subproblem) but on its own
+        it&rsquo;s not the ILP.
+      </p>
+
+      <p>
+        Two things can go wrong.
+      </p>
+
+      <h2>Pitfall 1: non-integer LP optimum</h2>
+
+      <p>
+        The LP relaxation&rsquo;s optimal vertex sometimes happens to
+        have integer coordinates and sometimes does not. If it does,
+        the LP answer is also the ILP answer (this is a textbook
+        result; the integer hull and the LP feasible region share that
+        vertex). If it doesn&rsquo;t, the LP optimum is a
+        <strong>bound</strong> on the ILP optimum, not the ILP optimum
+        itself.
+      </p>
+
+      <ul>
+        <li>For a <code>Maximize</code> problem, the LP optimum is an <em>upper</em> bound on <code>z*_ILP</code>.</li>
+        <li>For a <code>Minimize</code> problem, the LP optimum is a <em>lower</em> bound on <code>z*_ILP</code>.</li>
+      </ul>
+
+      <p>
+        The gap between the two is the <em>integrality gap</em>. For
+        some problem classes it is zero in practice (network flow,
+        assignment, matching on bipartite graphs). For others — most
+        scheduling, most packing — it&rsquo;s meaningful.
+      </p>
+
+      <h2>Pitfall 2: LP-feasible, ILP-infeasible</h2>
+
+      <p>
+        This is the sharp one. The LP relaxation can be feasible and
+        return an optimum even when the ILP has <em>no feasible
+        integer solution at all</em>. grove v0.1 will report
+        <code>Status = Optimal</code> with a non-integer vector; CBC
+        or HiGHS would correctly report <code>Infeasible</code>.
+      </p>
+
+      <p>
+        A minimal example. The following ILP is genuinely infeasible
+        — no integer pair <code>(x1, x2)</code> can satisfy
+        <code>0.5 ≤ x1 − x2 ≤ 0.75</code>:
+      </p>
+
+<pre><code class="language-go">p := grove.NewProblem("tricky", grove.Minimize)
+x1 := p.NewVar("x1", grove.Integer, grove.Bounds(-1, 1))
+x2 := p.NewVar("x2", grove.Integer, grove.Bounds(-1, 1))
+x3 := p.NewVar("x3", grove.Integer, grove.Bounds(-1, 1))
+p.SetObjective(grove.Expr{x1: 2, x2: -3, x3: 1})
+p.AddConstraint("c1", grove.Expr{x1: 1, x2: -1}, grove.GTE, 0.5)
+p.AddConstraint("c2", grove.Expr{x1: 1, x2: -1}, grove.LTE, 0.75)
+p.AddConstraint("c3", grove.Expr{x2: 1, x3: -1}, grove.LTE, 1.25)
+p.AddConstraint("c4", grove.Expr{x2: 1, x3: -1}, grove.GTE, 0.95)
+
+r, _ := p.Solve()
+// grove v0.1:    r.Status == Optimal,   z* = -0.25, (x1, x2, x3) = (0.75, 0.25, -1)
+// PuLP / CBC:    r.Status == Infeasible
+</code></pre>
+
+      <p>
+        In a continuous world this model has a perfectly fine vertex
+        at <code>(0.75, 0.25, -1)</code>. In an integer world, there
+        is simply no pair of integers in <code>[-1, 1]</code> whose
+        difference lies between <code>0.5</code> and <code>0.75</code>
+        (the closest feasible differences are <code>0</code> and
+        <code>1</code>). A true MIP solver knows this; a pure LP
+        solver does not.
+      </p>
+
+      <h2>How grove protects you</h2>
+
+      <p>
+        Every <code>Solve</code> runs a post-solve integrality check.
+        If the problem declares any <code>Integer</code> or
+        <code>Binary</code> variables and any of them come back
+        non-integer (within a tolerance of <code>1e-6</code>), grove
+        does three things:
+      </p>
+
+      <ol>
+        <li>Appends a warning to <code>Result.Warnings</code>.</li>
+        <li>Folds the same text into <code>Result.Message</code>.</li>
+        <li>Makes the list of offending variables available via <code>Result.NonIntegerIntegerVars(p) []*Var</code>.</li>
+      </ol>
+
+<pre><code class="language-go">res, _ := prob.Solve()
+if len(res.Warnings) &gt; 0 {
+    for _, w := range res.Warnings {
+        log.Printf("grove warning: %s", w)
+    }
+}
+for _, v := range res.NonIntegerIntegerVars(prob) {
+    log.Printf("non-integer in integer var %s: %g", v.Name(), res.Value(v))
+}
+</code></pre>
+
+      <p>
+        The warning prefix is exposed as a stable constant so you can
+        gate CI on it:
+      </p>
+
+<pre><code class="language-go">for _, w := range res.Warnings {
+    if strings.HasPrefix(w, grove.WarnLPRelaxationOnly) {
+        return fmt.Errorf("ILP relaxed to LP for model %q — refusing to promote", prob.Name())
+    }
+}
+</code></pre>
+
+      <h2>Rule of thumb until v0.4</h2>
+
+      <table>
+        <thead>
+          <tr><th>Your model</th><th>Trust grove&rsquo;s output?</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Only <code>Continuous</code> variables</td>
+            <td><span class="pill ok">yes, fully</span></td>
+          </tr>
+          <tr>
+            <td><code>Integer</code>/<code>Binary</code> vars, LP optimum is integer-valued, no warning</td>
+            <td><span class="pill ok">yes — this is the textbook case</span></td>
+          </tr>
+          <tr>
+            <td><code>Integer</code>/<code>Binary</code> vars, warning emitted</td>
+            <td><span class="pill warn">treat as a bound, not an answer</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        For the bottom row, use grove&rsquo;s result as an upper
+        bound (if you&rsquo;re maximising) or a lower bound (if
+        you&rsquo;re minimising) on the true ILP optimum. To get an
+        actual ILP answer, either wait for v0.4 or pass the same
+        model into HiGHS via the Python or C interface — grove can
+        write MPS for you, see <a href="./file-io.html">File I/O</a>.
+      </p>
+
+      <h2>Why grove doesn&rsquo;t just reject integer models</h2>
+
+      <p>
+        Because the <em>majority</em> of ILPs people write have
+        integer-valued LP vertices; totally-unimodular constraint
+        matrices are common. Rejecting those would be
+        surprising-in-a-different-way. grove takes the middle path:
+        accept the model, solve the relaxation, tell you when the
+        relaxation lied.
+      </p>
+
+      <p>
+        The same philosophy applies to the <code>HiGHS</code> backend
+        stub in v0.1 — it accepts the same <code>Solver</code> interface
+        shape so you can wire it into your code today, and it will
+        start returning real answers as soon as v0.3 lands.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roadmap — grove docs</title>
+<meta name="description" content="The plan for grove versions 0.1 through 1.0." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="roadmap">
+
+      <span class="doc-eyebrow">reference</span>
+      <h1>Roadmap.</h1>
+      <p class="doc-lede">
+        The plan, in versions. Pre-1.0 minor releases (0.1 → 0.2 → …)
+        are allowed to break the API as the design settles. The
+        full, continuously-updated source of truth is
+        <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md"><code>ROADMAP.md</code></a>
+        in the repo.
+      </p>
+
+      <h2>v0.1 — Pure-Go simplex</h2>
+      <p><span class="pill ok">shipped</span></p>
+      <ul>
+        <li>Modeling DSL: <code>Problem</code>, <code>Var</code>, <code>Expr</code>, <code>Constraint</code>, <code>Result</code>.</li>
+        <li>Two-phase simplex on a dense tableau with Bland&rsquo;s anti-cycling rule.</li>
+        <li>Shadow prices, reduced costs, slacks, structured <code>SensitivityReport</code>.</li>
+        <li>CPLEX-LP and MPS writers.</li>
+        <li>Post-solve LP-relaxation warning for <code>Integer</code>/<code>Binary</code> models.</li>
+      </ul>
+
+      <h2>v0.2 — File I/O round-trip and richer sensitivity</h2>
+      <p><span class="pill warn">planned · Q3</span> Backwards-compatible additions only.</p>
+      <ul>
+        <li>LP and MPS <em>readers</em> (to close the round-trip; MIPLIB-friendly).</li>
+        <li>Per-coefficient and per-RHS ranging for stable-basis intervals.</li>
+        <li>Warm starts: <code>SolveWith(prob, startingBasis)</code>.</li>
+        <li>Presolve that drops empty rows/columns and detects fixed variables.</li>
+      </ul>
+
+      <h2>v0.3 — HiGHS cgo backend</h2>
+      <p><span class="pill warn">planned · Q4</span> Optional, behind <code>-tags highs</code>.</p>
+      <ul>
+        <li><code>grove.HiGHS</code> becomes a real <code>Solver</code> backed by <a href="https://highs.dev">HiGHS</a>, cgo-linked.</li>
+        <li>Sparse CSC conversion; HiGHS duals/reduced costs surfaced through grove&rsquo;s own <code>Result</code>.</li>
+        <li>Benchmarks vs. pure Go on a curated MIPLIB subset.</li>
+      </ul>
+
+      <h2>v0.4 — Branch-and-bound MIP</h2>
+      <p><span class="pill warn">planned · next year</span> The first feature that needs a different solver core.</p>
+      <ul>
+        <li>Branch-and-bound wrapping the v0.1 simplex as the relaxation oracle.</li>
+        <li>Best-first node selection; most-fractional / strong / pseudocost branching.</li>
+        <li>Gomory and cover cuts.</li>
+        <li>Optimality gap reporting (<code>PrimalBound</code>, <code>DualBound</code>, <code>RelGap</code>).</li>
+        <li>Time-limit and gap-tolerance solver options.</li>
+      </ul>
+      <p>
+        v0.4 is the version that makes
+        <a href="./integer-variables.html">Integer variables</a>
+        go from caveat to first-class. Until then, the post-solve
+        warning is grove&rsquo;s honest shorthand for &ldquo;this
+        ILP didn&rsquo;t happen to land on an integer vertex&rdquo;.
+      </p>
+
+      <h2>v1.0 — Stability and docs</h2>
+      <p><span class="pill warn">planned · after production users</span></p>
+      <ul>
+        <li>API freeze for the modeling layer.</li>
+        <li>Cookbook-style site with twenty-plus worked models.</li>
+        <li>Long-running performance regression suite gating every release.</li>
+        <li>100% test coverage on the solver core.</li>
+      </ul>
+
+      <h2>Beyond 1.0 — speculative</h2>
+      <ul>
+        <li>Quadratic objectives (QP) via active-set methods on top of the simplex.</li>
+        <li>Network simplex for transportation/assignment LPs.</li>
+        <li>A WebAssembly build for in-browser demos.</li>
+        <li>Distributed cutting-plane MIP (Benders / Dantzig-Wolfe).</li>
+      </ul>
+
+      <hr>
+
+      <p>
+        If a feature on this list is blocking you today, the fastest
+        path is an issue on
+        <a href="https://github.com/jakenherman/grove/issues">GitHub</a>.
+        Knowing who&rsquo;s waiting on what moves the numbered order
+        around.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

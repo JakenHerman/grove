@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Problems, variables, constraints — grove docs</title>
+<meta name="description" content="How to build a grove model: Problem, Var, Expr, Objective, Constraint, and validation." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="modeling">
+
+      <span class="doc-eyebrow">modeling</span>
+      <h1>Problems, variables, constraints.</h1>
+      <p class="doc-lede">
+        Every grove program is the same four steps in a different
+        arrangement: create a <code>Problem</code>, declare
+        <code>Var</code>s, hand the problem an objective, attach
+        <code>Constraint</code>s. This page is the whole modeling DSL
+        on one screen.
+      </p>
+
+      <h2>Creating a problem</h2>
+
+      <p>
+        A <code>Problem</code> owns the variables and constraints
+        you&rsquo;ll hang off it. Construct one with a name and an
+        optimization sense.
+      </p>
+
+<pre><code class="language-go">prob := grove.NewProblem("nurse_schedule", grove.Minimize)
+// or: grove.NewProblem("value", grove.Maximize)
+</code></pre>
+
+      <p>
+        The name is used for error messages and file-format exports.
+        Use the Go-idiomatic name-the-decision-problem convention
+        (<code>nurse_schedule</code>, <code>vm_allocation</code>,
+        <code>diet</code>). You can change the sense later by
+        reassigning the field, but it&rsquo;s a footgun — do it before
+        you call <code>Solve</code>.
+      </p>
+
+      <h2>Variables</h2>
+
+      <p>
+        A variable is created through the <code>Problem</code> so
+        that grove can track it, assign it a column index, and later
+        feed you the value back:
+      </p>
+
+<pre><code class="language-go">x := prob.NewVar("x", grove.Continuous, grove.Bounds(0, grove.Inf))
+</code></pre>
+
+      <h3>Kinds</h3>
+
+      <p>
+        <code>kind</code> is one of three values, all of type
+        <code>grove.VarKind</code>:
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Kind</th><th>Domain</th><th>Status in v0.1</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>grove.Continuous</code></td>
+            <td>real numbers within bounds</td>
+            <td><span class="pill ok">solved directly</span></td>
+          </tr>
+          <tr>
+            <td><code>grove.Integer</code></td>
+            <td>integers within bounds</td>
+            <td><span class="pill warn">LP relaxation only</span></td>
+          </tr>
+          <tr>
+            <td><code>grove.Binary</code></td>
+            <td>{0, 1}</td>
+            <td><span class="pill warn">LP relaxation only</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        If you care about the <code>Integer</code>/<code>Binary</code>
+        row, read <a href="./integer-variables.html">Integer variables</a>
+        — grove runs a post-solve check and emits a warning if the
+        LP relaxation didn&rsquo;t happen to land on an integer
+        vertex, but the caveat is important enough that the whole page
+        is about it.
+      </p>
+
+      <h3>Bounds</h3>
+
+      <p>
+        <code>grove.Bounds(low, high)</code> is the only
+        <code>VarOption</code> in v0.1. Both arguments are
+        <code>float64</code>. For unbounded sides, pass
+        <code>grove.Inf</code> or <code>-grove.Inf</code>:
+      </p>
+
+<pre><code class="language-go">a := prob.NewVar("a", grove.Continuous, grove.Bounds(0, grove.Inf))           // a ≥ 0
+b := prob.NewVar("b", grove.Continuous, grove.Bounds(-grove.Inf, grove.Inf))  // free
+c := prob.NewVar("c", grove.Continuous, grove.Bounds(0, 1))                   // [0, 1]
+d := prob.NewVar("d", grove.Continuous, grove.Bounds(-5, 5))                  // [-5, 5]
+</code></pre>
+
+      <p>
+        If you omit <code>Bounds</code> entirely you get the default
+        <code>[0, +∞)</code>, which is what most LP formulations want.
+      </p>
+
+      <p>
+        Internally, bounded variables are substituted so the standard
+        form sees only non-negative variables; free variables are
+        split into a positive and a negative component. You don&rsquo;t
+        have to know any of that to use the library — the point is that
+        <em>you don&rsquo;t need to do any of it by hand</em>.
+      </p>
+
+      <h2>Expressions</h2>
+
+      <p>
+        <code>grove.Expr</code> is a Go map from <code>*Var</code> to
+        coefficient. The map itself is the linear expression — there
+        is no wrapper type to remember:
+      </p>
+
+<pre><code class="language-go">e := grove.Expr{x: 3, y: -2, z: 1} // 3x - 2y + z
+</code></pre>
+
+      <p>
+        Two helpers exist for when the expression comes from data:
+      </p>
+
+<pre><code class="language-go">e := grove.Expr{x: 1}
+e.Add(grove.Expr{y: 2})          // e is now {x: 1, y: 2}
+e.Scale(0.5)                     // e is now {x: 0.5, y: 1}
+</code></pre>
+
+      <p>
+        Because <code>Expr</code> is just a map, the ergonomic way to
+        build a big constraint is the range-over-slice idiom:
+      </p>
+
+<pre><code class="language-go">obj := grove.Expr{}
+for i := range foods {
+    obj[x[i]] = foods[i].pricePerGram
+}
+prob.SetObjective(obj)
+</code></pre>
+
+      <h2>Objectives</h2>
+
+      <p>
+        Set the objective by handing the problem one
+        <code>Expr</code>:
+      </p>
+
+<pre><code class="language-go">prob.SetObjective(grove.Expr{x: 1, y: 1})
+</code></pre>
+
+      <p>
+        The sense (Maximize / Minimize) is on the <code>Problem</code>,
+        not on the objective — one less sign to track. grove negates
+        internally for <code>Maximize</code> and un-negates the
+        returned objective for you.
+      </p>
+
+      <p>
+        A fixed constant offset is optional:
+      </p>
+
+<pre><code class="language-go">prob.SetObjectiveConstant(5) // z → z + 5
+</code></pre>
+
+      <p>
+        This is convenient when the mathematically clean objective is
+        something like &ldquo;minimise total cost with a flat $5
+        admin fee on top&rdquo;.
+      </p>
+
+      <h2>Constraints</h2>
+
+      <p>
+        Each <code>AddConstraint</code> call returns a
+        <code>*Constraint</code> handle. Hold onto it if you want to
+        read the shadow price back from the <code>Result</code>:
+      </p>
+
+<pre><code class="language-go">budget := prob.AddConstraint(
+    "budget",
+    grove.Expr{day: 1200, night: 1500},
+    grove.LTE,
+    18000,
+)
+// later:
+fmt.Println(res.Dual(budget)) // ∂z*/∂rhs of `budget`
+</code></pre>
+
+      <p>
+        The relation is <code>grove.LTE</code>, <code>grove.GTE</code>,
+        or <code>grove.EQ</code>. Right-hand side is a single
+        <code>float64</code>. Negative RHS, non-zero RHS, and
+        two-sided inequalities composed of a pair of rows all work.
+      </p>
+
+      <p>
+        Constraint names must be unique per problem; duplicates will
+        cause <code>Validate</code> to fail. Names show up in error
+        messages, LP/MPS exports, and the
+        <a href="./sensitivity.html">sensitivity report</a>.
+      </p>
+
+      <h2>Validation</h2>
+
+      <p>
+        <code>Validate</code> runs automatically at the top of
+        <code>Solve</code>, but you can call it yourself earlier if
+        you&rsquo;re building a model in pieces:
+      </p>
+
+<pre><code class="language-go">if err := prob.Validate(); err != nil {
+    return fmt.Errorf("bad model: %w", err)
+}
+</code></pre>
+
+      <p>
+        The checks it performs today: non-empty variable and
+        constraint lists, unique names, no inverted bounds
+        (<code>low &gt; high</code>), a non-nil objective, and no
+        dangling <code>*Var</code>s that belong to a different
+        <code>Problem</code>.
+      </p>
+
+      <h2>Putting it together</h2>
+
+      <p>
+        A complete model is short. This is the nurse-scheduling LP
+        from the intro, with the shape of every section above made
+        explicit:
+      </p>
+
+<pre><code class="language-go">prob := grove.NewProblem("nurses", grove.Maximize)           // Problem
+
+day   := prob.NewVar("day",   grove.Continuous, grove.Bounds(0, grove.Inf))  // Variables
+night := prob.NewVar("night", grove.Continuous, grove.Bounds(0, grove.Inf))
+
+prob.SetObjective(grove.Expr{day: 1, night: 1})              // Objective
+
+prob.AddConstraint("day_min",   grove.Expr{day: 1},                 grove.GTE, 4)
+prob.AddConstraint("night_min", grove.Expr{night: 1},               grove.GTE, 2)
+prob.AddConstraint("budget",    grove.Expr{day: 1200, night: 1500}, grove.LTE, 18000)
+
+res, _ := prob.Solve()                                        // Solve
+</code></pre>
+
+      <p>
+        With a model in hand, the next page is how to read the
+        <code>Result</code> object.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>

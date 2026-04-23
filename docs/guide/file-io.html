@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>File I/O and solvers — grove docs</title>
+<meta name="description" content="Exporting LP/MPS files, the Solver interface, and the HiGHS backend preview." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-light.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/atom-one-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/go.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/bash.min.js"></script>
+<link rel="stylesheet" href="./assets/docs.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-row">
+    <a href="../index.html" class="brand">grove <span class="brand-suffix">docs</span></a>
+    <div class="topbar-links">
+      <a href="./index.html" data-nav="docs">Docs</a>
+      <a href="../index.html#examples" class="nav-only-wide">Site</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples" class="nav-only-wide">Examples</a>
+      <a href="https://github.com/jakenherman/grove">GitHub →</a>
+    </div>
+    <button class="hamburger" aria-label="Toggle docs menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="doc-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="doc-main">
+    <article class="doc-content" data-doc-slug="file-io">
+
+      <span class="doc-eyebrow">integration</span>
+      <h1>File I/O and solvers.</h1>
+      <p class="doc-lede">
+        grove is written to play nicely with the rest of the LP
+        ecosystem. You can export any model to a standard LP or MPS
+        file to hand to another solver, and you can swap in a
+        different backend behind the <code>grove.Solver</code>
+        interface — including the HiGHS cgo backend that ships in
+        v0.3.
+      </p>
+
+      <h2>CPLEX-LP format</h2>
+
+      <p>
+        <code>WriteLP</code> serialises a <code>Problem</code> into
+        the widely-supported CPLEX-LP format:
+      </p>
+
+<pre><code class="language-go">var buf bytes.Buffer
+if err := prob.WriteLP(&amp;buf); err != nil {
+    return err
+}
+fmt.Println(buf.String())
+</code></pre>
+
+      <p>
+        Example output for the nurse-scheduling model:
+      </p>
+
+<pre><code>\Problem name: nurses
+\Sense:        Maximize
+
+Maximize
+ obj: day + night
+
+Subject To
+ day_min:   day &gt;= 4
+ night_min: night &gt;= 2
+ budget:    1200 day + 1500 night &lt;= 18000
+
+Bounds
+ 0 &lt;= day
+ 0 &lt;= night
+
+End
+</code></pre>
+
+      <p>
+        The writer respects variable kinds (<code>Integer</code> and
+        <code>Binary</code> are emitted under a <code>General</code>
+        or <code>Binary</code> section) and bounds, so a round-trip
+        through a MIP solver will see the same model you handed
+        grove.
+      </p>
+
+      <h2>MPS format</h2>
+
+      <p>
+        Fixed-column MPS is the lingua franca of academic LP/MIP. Use
+        <code>WriteMPS</code> when you&rsquo;re interfacing with a tool
+        that prefers it over LP, or when your problem is too large for
+        LP format&rsquo;s quirks:
+      </p>
+
+<pre><code class="language-go">f, err := os.Create("nurses.mps")
+if err != nil {
+    return err
+}
+defer f.Close()
+if err := prob.WriteMPS(f); err != nil {
+    return err
+}
+</code></pre>
+
+      <p>
+        grove&rsquo;s MPS writer names everything from your
+        <code>Problem</code> — constraint names, variable names,
+        problem name — and runs them through a sanitizer for the
+        MPS identifier rules (no spaces, 8-char-friendly where
+        possible, unique). If you&rsquo;re relying on specific names
+        for a downstream tool, check the output and rename upstream.
+      </p>
+
+      <div class="callout">
+        <span class="callout-label">roadmap</span>
+        <p>
+          MPS and LP <em>readers</em> land in v0.2, which will close
+          the round-trip. v0.1 ships only the writers because the
+          immediate use-case is &ldquo;hand my model to CBC or
+          HiGHS&rdquo;.
+        </p>
+      </div>
+
+      <h2>The Solver interface</h2>
+
+      <p>
+        The default pure-Go simplex is a concrete implementation of
+        a small interface:
+      </p>
+
+<pre><code class="language-go">type Solver interface {
+    Solve(p *Problem) (*Result, error)
+}
+</code></pre>
+
+      <p>
+        Assign a different implementation to <code>prob.Solver</code>
+        and <code>Solve</code> will dispatch to it instead of the
+        default:
+      </p>
+
+<pre><code class="language-go">prob.Solver = &amp;grove.HiGHS{} // real implementation ships in v0.3
+res, err := prob.Solve()
+</code></pre>
+
+      <p>
+        This is a hook, not a plugin system — grove has exactly one
+        extension point today, and that is the right number until a
+        second real backend exists. If you need to wrap the simplex
+        for logging, timing, or fallback, writing a trivial adapter
+        that holds a <code>*grove.SimplexSolver</code> and satisfies
+        the interface is a ten-line job.
+      </p>
+
+      <h2>The HiGHS backend (v0.3 preview)</h2>
+
+      <p>
+        <a href="https://highs.dev">HiGHS</a> is a well-regarded
+        open-source LP/MIP solver. grove v0.3 will ship a cgo-linked
+        backend behind the <code>highs</code> build tag:
+      </p>
+
+<pre><code class="language-bash">go build -tags highs ./...
+</code></pre>
+
+      <p>
+        Without the tag, <code>grove.HiGHS.Solve</code> returns
+        <code>grove.ErrHiGHSNotBuilt</code>, which you can detect and
+        fall back to the pure-Go solver:
+      </p>
+
+<pre><code class="language-go">prob.Solver = &amp;grove.HiGHS{}
+res, err := prob.Solve()
+if errors.Is(err, grove.ErrHiGHSNotBuilt) {
+    prob.Solver = nil // back to the simplex default
+    res, err = prob.Solve()
+}
+</code></pre>
+
+      <p>
+        Once enabled, HiGHS brings three things grove v0.1 doesn&rsquo;t
+        have: a true MIP solver (branch-and-bound with cuts, before
+        grove&rsquo;s own in v0.4), a sparse presolver that makes
+        large models solve in seconds instead of minutes, and its
+        own ranging sensitivity output.
+      </p>
+
+      <p>
+        The rest of your code — your <code>Problem</code> construction,
+        your <code>Result</code> inspection, your sensitivity report —
+        is unchanged. That symmetry is the whole point of the
+        <code>Solver</code> interface.
+      </p>
+
+      <h2>Interop recipe: grove → CBC</h2>
+
+      <p>
+        Until the HiGHS backend ships, if you need a true MIP answer
+        the pragmatic thing is to export MPS and shell out to CBC or
+        a HiGHS-packaged binary. This is five lines of Go:
+      </p>
+
+<pre><code class="language-go">f, _ := os.CreateTemp("", "model-*.mps")
+defer os.Remove(f.Name())
+_ = prob.WriteMPS(f)
+f.Close()
+
+out, err := exec.Command("cbc", f.Name(), "solve", "printi", "csv").Output()
+if err != nil {
+    return fmt.Errorf("cbc: %w", err)
+}
+// Parse `out` — or read CBC's solution file and look variables up
+// by name via prob.VarByName.
+</code></pre>
+
+      <p>
+        If that strays into hacky territory for your taste, the
+        cleaner option is to wait three weeks and use
+        <code>grove.HiGHS</code>.
+      </p>
+
+    </article>
+    <nav class="prev-next"></nav>
+  </main>
+
+  <aside class="toc"></aside>
+</div>
+
+<footer class="doc-footer">
+  <div class="inner">
+    <div><span class="leaf">●</span> grove &middot; MIT &middot; built for Go backends.</div>
+    <div style="display: flex; gap: 22px;">
+      <a href="https://github.com/jakenherman/grove">github</a>
+      <a href="https://github.com/jakenherman/grove/blob/main/ROADMAP.md">roadmap</a>
+      <a href="https://github.com/jakenherman/grove/tree/main/examples">examples</a>
+    </div>
+  </div>
+</footer>
+
+<script src="./assets/docs.js"></script>
+</body>
+</html>
