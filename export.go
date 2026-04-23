@@ -139,10 +139,13 @@ func (p *Problem) WriteMPS(w io.Writer) error {
 			}
 			fmt.Fprintf(bw, "    %-9s %-9s %15.8g\n", sanitize(v.name), "COST", signed)
 		}
-		// Constraint coefficients (sorted by row idx for stable output).
+		// Constraint coefficients (sorted by row idx for stable
+		// output). Zero-valued entries are skipped — they carry no
+		// information and their presence breaks round-tripping
+		// through a reader that (rightly) drops them.
 		var rows []*Constraint
 		for _, c := range p.constraints {
-			if _, ok := c.expr[v]; ok {
+			if coef, ok := c.expr[v]; ok && coef != 0 {
 				rows = append(rows, c)
 			}
 		}
@@ -167,6 +170,14 @@ func (p *Problem) WriteMPS(w io.Writer) error {
 	// BOUNDS
 	bw.WriteString("BOUNDS\n")
 	for _, v := range p.vars {
+		// Binary variables get the dedicated BV row so readers can
+		// restore the Binary kind independently of the INTORG marker
+		// (which only records "integer"). Continuous and Integer vars
+		// share the LO/UP/FR/MI vocabulary.
+		if v.kind == Binary && v.low == 0 && v.high == 1 {
+			fmt.Fprintf(bw, " BV BND       %s\n", sanitize(v.name))
+			continue
+		}
 		switch {
 		case math.IsInf(v.low, -1) && math.IsInf(v.high, 1):
 			fmt.Fprintf(bw, " FR BND       %s\n", sanitize(v.name))

@@ -187,15 +187,77 @@ if err := prob.WriteMPS(f); err != nil {
         for a downstream tool, check the output and rename upstream.
       </p>
 
-      <div class="callout">
-        <span class="callout-label">roadmap</span>
-        <p>
-          The CPLEX-LP reader (<code>ReadLP</code>) shipped in v0.2 and
-          is documented above. The MPS reader is the next v0.2 item —
-          until it lands, models authored in MPS need a detour through
-          an LP converter.
-        </p>
-      </div>
+      <h3>Reading MPS files</h3>
+
+      <p>
+        <code>grove.ReadMPS</code> is the inverse of
+        <code>WriteMPS</code>. It parses every section grove emits —
+        <code>NAME</code>, <code>ROWS</code>, <code>COLUMNS</code>
+        (with the familiar <code>INTORG</code>/<code>INTEND</code>
+        integer markers), <code>RHS</code>, <code>BOUNDS</code>,
+        <code>ENDATA</code> — plus optional <code>OBJSENSE</code>,
+        <code>RANGES</code>, and <code>SOS</code> headers. The parser
+        has been round-tripped against a handful of MIPLIB instances
+        (flugpl, gr4x6, pk1) as part of the test suite.
+      </p>
+
+<pre><code class="language-go">f, err := os.Open("flugpl.mps")
+if err != nil {
+    return err
+}
+defer f.Close()
+
+prob, err := grove.ReadMPS(f)
+if err != nil {
+    return err // parse errors carry the offending line
+}
+</code></pre>
+
+      <h4>Fixed vs free-form, auto-detected</h4>
+
+      <p>
+        MPS has two encodings on the wire: the original fixed-column
+        layout (data in columns 2-3, 5-12, 15-22, 25-36, 40-47,
+        50-61), and the modern free-form variant that simply
+        whitespace-separates fields — handy when variable names
+        exceed the original 8-character slot. By default
+        <code>ReadMPS</code> auto-detects which you&rsquo;ve given it:
+        it scans the first data line of <code>COLUMNS</code>,
+        <code>RHS</code>, <code>RANGES</code>, or <code>BOUNDS</code>
+        and checks whether any identifier spills into one of the
+        layout&rsquo;s reserved whitespace gutters. If it does, the
+        file is parsed as free-form; otherwise as fixed-column. For
+        well-formed input with short names the two are
+        indistinguishable, and both parsers accept either.
+      </p>
+
+      <p>
+        Callers that know their input ahead of time can pin the
+        parser to one mode or the other with an option, bypassing
+        auto-detection:
+      </p>
+
+<pre><code class="language-go">prob, err := grove.ReadMPS(f, grove.MPSFreeInput())
+// or
+prob, err := grove.ReadMPS(f, grove.MPSFixedInput())
+</code></pre>
+
+      <p>
+        Unknown section headers (e.g. a typo like <code>BOUNDSS</code>)
+        surface a parse error rather than being silently dropped, so
+        malformed input fails fast. <code>SOS</code> sections are
+        silently skipped because grove doesn&rsquo;t model SOS sets
+        yet; <code>RANGES</code> rows raise the same "range
+        constraints are not supported" diagnostic as the LP reader,
+        so you know to split the row into two before re-reading.
+      </p>
+
+      <p>
+        Parse errors for both readers share the
+        <code>*grove.ParseError</code> type; MPS errors set
+        <code>Format = "MPS"</code> so the rendered message reads
+        <code>grove: MPS parse error at line N: ...</code>.
+      </p>
 
       <h2>The Solver interface</h2>
 
