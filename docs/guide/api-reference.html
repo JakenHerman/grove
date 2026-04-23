@@ -188,6 +188,10 @@
           <span class="sig">MaxIterations int</span>
           <p>Hard pivot cap. <code>0</code> (the default) means &ldquo;use the solver default&rdquo; — effectively unbounded.</p>
         </div>
+        <div class="def">
+          <span class="sig">SkipPresolve bool</span>
+          <p>When <code>true</code>, <code>Solve</code> bypasses the v0.2 presolve pass (fixed-variable substitution, empty-row/empty-column removal). Off by default. Useful for debugging solver behaviour or for reproducing results against an external reference; most callers should leave it alone. See <a href="./solving.html#presolve">Presolve</a>.</p>
+        </div>
       </div>
 
       <h3>Construction</h3>
@@ -271,6 +275,25 @@
         <div class="def">
           <span class="sig">func (p *Problem) Solve() (*Result, error)</span>
           <p>Runs <code>p.Solver</code> (or the default simplex). Returns <code>(*Result, nil)</code> for any logical outcome including <code>Infeasible</code>/<code>Unbounded</code>; non-nil <code>error</code> is reserved for structural model mistakes. See <a href="./solving.html">Solve and Result</a>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (p *Problem) Presolve(opts *PresolveOptions) (*Problem, *PresolveUndo, error)</span>
+          <p>Runs the presolve pass and returns a reduced copy of <code>p</code> plus the undo map required to re-expand a <code>Result</code>. Never mutates <code>p</code>. <code>Solve</code> invokes this automatically unless <code>p.SkipPresolve</code> is <code>true</code>. See <a href="./solving.html#presolve">Presolve</a>.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type PresolveOptions struct {
+  Tolerance float64
+}</span>
+          <p>Configuration for <code>Presolve</code>. <code>Tolerance</code> (default <code>1e-9</code>) is the slack used for feasibility and zero checks on reduced rows. Passing <code>nil</code> is equivalent to passing the zero value.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type PresolveUndo struct {
+  Terminal    Status
+  TerminalMsg string
+  // unexported: the original problem, settled variable values,
+  // reduced↔original handle maps, dropped constraints, objective shift.
+}</span>
+          <p>Undo record produced by <code>Presolve</code>. <code>Terminal</code> is non-<code>NotSolved</code> when the pass decided the problem's status on its own — <code>Infeasible</code> for an inconsistent empty row, <code>Unbounded</code> for a free objective-only variable, <code>Optimal</code> when every variable was fixed. <code>Solve</code> uses the undo record to re-expand <code>Value</code> and duals to the original index space automatically.</p>
         </div>
       </div>
 
