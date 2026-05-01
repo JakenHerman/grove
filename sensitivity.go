@@ -31,8 +31,9 @@ type Sensitivity struct {
 
 // ObjCoefRange is the closed interval of values an objective coefficient
 // can take while the current optimal basis remains optimal. Lo or Hi may
-// be ±[Inf] for a half-line. The width [Lo, Hi] is the v0.2 ranging
-// quantity from Bertsimas & Tsitsiklis §5.2.
+// be ±[Inf] for a half-line, and the full (-Inf, +Inf) interval is the
+// "ranging not computed through presolve" sentinel. The width [Lo, Hi]
+// is the v0.2 ranging quantity from Bertsimas & Tsitsiklis §5.2.
 type ObjCoefRange struct {
 	Lo, Hi float64
 }
@@ -40,8 +41,9 @@ type ObjCoefRange struct {
 // RHSRange is the closed interval of values a constraint's right-hand
 // side can take while the current optimal basis remains primal-feasible
 // (and therefore optimal, since dual feasibility is unaffected by RHS
-// changes). Lo or Hi may be ±[Inf] for a half-line. From Bertsimas &
-// Tsitsiklis §5.2.
+// changes). Lo or Hi may be ±Inf for a half-line, and the full
+// (-Inf, +Inf) interval is the "ranging not computed through presolve"
+// sentinel. From Bertsimas & Tsitsiklis §5.2.
 type RHSRange struct {
 	Lo, Hi float64
 }
@@ -132,8 +134,9 @@ func SensitivityReport(p *Problem, r *Result) *Sensitivity {
 // The output is two tables — one per constraint, one per variable —
 // extending the v0.1 columns with the v0.2 ranging numbers (rhs-lo /
 // rhs-hi for constraints, coef-lo / coef-hi for variables) appended on
-// the right. ±Inf in any range column marks a half-line; range columns
-// are blank for entries that did not survive presolve.
+// the right. ±Inf in any range column marks a half-line; entries that
+// did not survive presolve render as the full -inf / +inf interval —
+// the "ranging not computed through presolve" sentinel.
 func (s *Sensitivity) String() string {
 	var b strings.Builder
 	b.WriteString("Constraints\n")
@@ -167,14 +170,11 @@ func (s *Sensitivity) String() string {
 	return b.String()
 }
 
-// formatRangeBound renders a range endpoint compactly: blank when the
-// bound is NaN (sentinel for "range not computed"), "+inf" / "-inf" for
-// ±Inf, and a %.4g number otherwise. Keeping +inf / -inf textual matches
-// [formatBound] used by [Problem.String].
+// formatRangeBound renders a range endpoint compactly: "+inf" / "-inf"
+// for ±Inf and a %.4g number otherwise. Keeping +inf / -inf textual
+// matches [formatBound] used by [Problem.String].
 func formatRangeBound(x float64) string {
 	switch {
-	case math.IsNaN(x):
-		return ""
 	case math.IsInf(x, 1):
 		return "+inf"
 	case math.IsInf(x, -1):

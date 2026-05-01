@@ -247,8 +247,10 @@ func (s *SimplexSolver) Solve(p *Problem) (*Result, error) {
 		ri, ok := std.rowOf[c]
 		if !ok {
 			// Constraint did not reach the simplex (presolve will hand
-			// the original *Constraint back via its undo map; the
-			// half-line sentinel is correct for redundant rows).
+			// the original *Constraint back via its undo map). Use the
+			// (-Inf, +Inf) "ranging not computed through presolve"
+			// sentinel; presolve.expand may overwrite it with the
+			// reduced-problem range adjusted for the substitution.
 			res.rhsRange[c] = RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 			continue
 		}
@@ -644,8 +646,9 @@ func (s *stdForm) reducedCosts(c, _ []float64) []float64 {
 
 // internalRange is a [Lo, Hi] interval expressing how much an internal
 // coefficient (or RHS) can change while the current basis remains valid.
-// ±Inf encodes a half-line; rangeMath helpers in the SimplexSolver clip
-// these into the user model's domain.
+// ±Inf encodes a half-line; the caller (currently the post-Phase-II
+// section of [SimplexSolver.Solve]) translates these intervals back into
+// the user model's domain.
 type internalRange struct {
 	Lo, Hi float64
 }
@@ -662,6 +665,12 @@ type internalRange struct {
 //
 // Artificials are reported as the (-Inf, +Inf) sentinel — their cost is
 // never user-visible.
+//
+// Reduced costs at the optimum are ≥ 0 only within the solver's
+// tolerance, so we clamp slightly-negative values to 0 before forming
+// bounds. Without the clamp a roundoff-sized rc[k] = -1e-13 paired with
+// a positive A_current[i*][k] would yield Hi ≈ -1e-13, excluding Δ=0
+// from the range.
 func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
 	out := make([]internalRange, s.n)
 	inBasis := make(map[int]int, s.m) // column → row
@@ -671,6 +680,12 @@ func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
 	artSet := make(map[int]bool, len(s.artificials))
 	for _, j := range s.artificials {
 		artSet[j] = true
+	}
+	clampNN := func(x float64) float64 {
+		if x < 0 && x > -tol {
+			return 0
+		}
+		return x
 	}
 	for j := 0; j < s.n; j++ {
 		if artSet[j] {
@@ -693,7 +708,7 @@ func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
 				if math.Abs(a) <= tol {
 					continue
 				}
-				bound := rc[k] / a
+				bound := clampNN(rc[k]) / a
 				if a > 0 {
 					if bound < dHi {
 						dHi = bound
@@ -710,7 +725,7 @@ func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
 		// Non-basic. Reduced cost rc[j] is ≥ 0 at optimum (within tol);
 		// raising the cost only makes it more positive, lowering it by
 		// more than rc[j] makes it negative and triggers a re-pivot.
-		out[j] = internalRange{Lo: -rc[j], Hi: math.Inf(1)}
+		out[j] = internalRange{Lo: -clampNN(rc[j]), Hi: math.Inf(1)}
 	}
 	return out
 }
@@ -723,6 +738,11 @@ func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
 // The j-th basic variable's value moves to x_B[j] + Δ * (B^{-1} e_i)[j].
 // Because we kept the tableau in B^{-1}-form (A_current = B^{-1} A_orig),
 // (B^{-1} e_i)[j] is exactly A_current[j][origIdentityCol[i]].
+//
+// Basic values at the end of Phase II are ≥ 0 only within solver
+// tolerance; we clamp slightly-negative values to 0 before forming the
+// bound so a roundoff-sized x_B[k] = -1e-13 doesn't push Δ=0 outside
+// the returned interval.
 func (s *stdForm) rhsRanges(tol float64) []internalRange {
 	out := make([]internalRange, s.m)
 	for i := 0; i < s.m; i++ {
@@ -733,7 +753,11 @@ func (s *stdForm) rhsRanges(tol float64) []internalRange {
 			if math.Abs(a) <= tol {
 				continue
 			}
-			bound := -s.b[k] / a
+			bk := s.b[k]
+			if bk < 0 && bk > -tol {
+				bk = 0
+			}
+			bound := -bk / a
 			if a > 0 {
 				if bound > dLo {
 					dLo = bound

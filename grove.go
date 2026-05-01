@@ -621,11 +621,11 @@ type Result struct {
 	dual    map[*Constraint]float64 // shadow prices / dual values
 	reduced map[*Var]float64        // reduced costs of variables
 
-	// Ranging diagnostics (set when Status == Optimal). For variables and
-	// constraints that did not reach the simplex (e.g. presolve dropped
-	// them) the range is the half-open (-Inf, +Inf) sentinel — changing a
-	// fixed variable's coefficient or a redundant constraint's RHS does
-	// not affect the optimum.
+	// Ranging diagnostics (set when Status == Optimal). The (-Inf, +Inf)
+	// full-line interval is the "ranging not computed through presolve"
+	// sentinel — emitted for fixed variables (whose coefficient does not
+	// influence the optimum) and for redundant rows dropped by presolve
+	// (whose exact one-sided feasibility width is not computed in v0.2).
 	objCoefRange map[*Var]ObjCoefRange
 	rhsRange     map[*Constraint]RHSRange
 

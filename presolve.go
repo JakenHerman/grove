@@ -357,20 +357,39 @@ func (u *PresolveUndo) expand(res *Result) *Result {
 		out.reduced[ov] = res.reduced[rv]
 		out.objCoefRange[ov] = res.objCoefRange[rv]
 	}
-	// Constraints carried through from the reduced solve.
+	// Constraints carried through from the reduced solve. The reduced
+	// constraint's RHS is the original RHS minus Σ(k · fixed_val) for
+	// every fixed variable substituted out of the row, so the user-facing
+	// range — stated relative to the *original* RHS — picks up the same
+	// constant offset.
 	for rc, oc := range u.consMap {
 		out.dual[oc] = res.dual[rc]
-		out.rhsRange[oc] = res.rhsRange[rc]
+		shift := oc.rhs - rc.rhs
+		rrng := res.rhsRange[rc]
+		out.rhsRange[oc] = RHSRange{
+			Lo: shiftEndpoint(rrng.Lo, shift),
+			Hi: shiftEndpoint(rrng.Hi, shift),
+		}
 	}
-	// Dropped constraints: zero dual, half-line RHS range. The presolve
-	// drop is exact only because 0 ⟂ rhs holds at the original RHS;
-	// reporting the per-direction width is post-1.0 work.
+	// Dropped constraints: zero dual, full-line "ranging not computed
+	// through presolve" sentinel. The presolve drop is exact only
+	// because 0 ⟂ rhs holds at the original RHS; reporting the
+	// per-direction feasibility width of an empty row is post-1.0 work.
 	rhsUnbounded := RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 	for _, oc := range u.droppedCons {
 		out.dual[oc] = 0
 		out.rhsRange[oc] = rhsUnbounded
 	}
 	return out
+}
+
+// shiftEndpoint adds a finite offset to a range endpoint, leaving ±Inf
+// fixed (Inf + finite is still Inf).
+func shiftEndpoint(x, shift float64) float64 {
+	if math.IsInf(x, 0) {
+		return x
+	}
+	return x + shift
 }
 
 // terminalResult synthesises a [Result] for the cases where Presolve

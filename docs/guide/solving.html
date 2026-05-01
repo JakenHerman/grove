@@ -91,9 +91,11 @@ case grove.IterationLimit, grove.NumericalError:
     Warnings   []string      // Advisory notes; v0.1 emits WarnLPRelaxationOnly when an ILP was silently relaxed
 
     // Accessor methods read the internal maps:
-    //   Value(v)   float64   value of variable v
-    //   Dual(c)    float64   shadow price of constraint c (∂z*/∂rhs)
-    //   Reduced(v) float64   reduced cost of variable v
+    //   Value(v)         float64       value of variable v
+    //   Dual(c)          float64       shadow price of constraint c (∂z*/∂rhs)
+    //   Reduced(v)       float64       reduced cost of variable v
+    //   ObjCoefRange(v)  ObjCoefRange  basis-stability interval on v's obj coefficient
+    //   RHSRange(c)      RHSRange      basis-stability interval on c's right-hand side
     //   NonIntegerIntegerVars(p) []*Var  integer/binary vars whose LP optimum is non-integer
 }
 </code></pre>

@@ -7,8 +7,8 @@ import (
 )
 
 // approxEqTight is a 1e-9 comparator. Range computations from a clean
-// optimal basis come out to machine precision; the looser eps is for
-// solver-iteration artifacts in problems that may have multiple optima.
+// optimal basis come out to machine precision, so we tighten well past
+// the 1e-6 tolerance the broader solver tests use.
 func approxEqTight(a, b float64) bool {
 	switch {
 	case math.IsInf(a, 1) && math.IsInf(b, 1):
@@ -219,6 +219,75 @@ func TestRangingDualBoundedRangesMin(t *testing.T) {
 	r2 := r.RHSRange(c2)
 	if !approxEqTight(r2.Lo, 4) || !approxEqTight(r2.Hi, 12) {
 		t.Errorf("RHSRange(c2) = [%.12g, %.12g], want [4, 12]", r2.Lo, r2.Hi)
+	}
+}
+
+// TestRangingPresolveRHSOffset is a regression test for the bug where a
+// constraint's user-facing RHS range was reported in *reduced* RHS units
+// when presolve substituted a fixed variable into the row. The reduced
+// constraint has rhs' = rhs - Σ(k · fixed_val); the user-facing range
+// must be stated in the original RHS units.
+//
+// The model below has a ≥ constraint that mentions a fixed variable. The
+// reduced row drops the fixed term and shifts the RHS down by 5; the
+// user-facing range must shift back up.
+func TestRangingPresolveRHSOffset(t *testing.T) {
+	// Two equivalent models:
+	//   (1) one with a fixed variable that presolve will eliminate
+	//   (2) the same LP with the fixed variable already substituted out
+	// Their RHS ranges, reported in user RHS units, must agree.
+
+	// Model with fixed variable.
+	pFixed := NewProblem("fixed", Minimize)
+	a := pFixed.NewVar("a", Continuous, Bounds(5, 5)) // fixed at 5
+	b := pFixed.NewVar("b", Continuous, Bounds(0, Inf))
+	c := pFixed.NewVar("c", Continuous, Bounds(0, Inf))
+	pFixed.SetObjective(Expr{a: 1, b: 1, c: 2})
+	cFixed := pFixed.AddConstraint("mix", Expr{a: 1, b: 1, c: 1}, GTE, 8)
+	pFixed.AddConstraint("c-min", Expr{c: 1}, GTE, 1)
+
+	rFixed, err := pFixed.Solve()
+	if err != nil || rFixed.Status != Optimal {
+		t.Fatalf("fixed-model solve: %v %v", rFixed.Status, err)
+	}
+
+	// Equivalent model: a is gone; "mix" becomes b + c ≥ 3 (8 - 5).
+	pSub := NewProblem("sub", Minimize)
+	bSub := pSub.NewVar("b", Continuous, Bounds(0, Inf))
+	cSub := pSub.NewVar("c", Continuous, Bounds(0, Inf))
+	pSub.SetObjective(Expr{bSub: 1, cSub: 2})
+	pSub.SetObjectiveConstant(5) // a's contribution
+	cSubMix := pSub.AddConstraint("mix", Expr{bSub: 1, cSub: 1}, GTE, 3)
+	pSub.AddConstraint("c-min", Expr{cSub: 1}, GTE, 1)
+
+	rSub, err := pSub.Solve()
+	if err != nil || rSub.Status != Optimal {
+		t.Fatalf("sub-model solve: %v %v", rSub.Status, err)
+	}
+
+	// Sanity: same primal values, same objective.
+	if !approxEqTight(rFixed.Objective, rSub.Objective) {
+		t.Fatalf("objectives diverge: %g vs %g", rFixed.Objective, rSub.Objective)
+	}
+
+	// The user-facing RHS range on "mix" must be stated against the
+	// original RHS (8), not the reduced RHS (3). Translation: shift =
+	// rSub.RHSRange(cSubMix) + 5.
+	got := rFixed.RHSRange(cFixed)
+	want := rSub.RHSRange(cSubMix)
+	if !approxEqTight(got.Lo, want.Lo+5) {
+		t.Errorf("RHSRange.Lo = %.12g, want %.12g (reduced %.12g + 5)",
+			got.Lo, want.Lo+5, want.Lo)
+	}
+	if !approxEqTight(got.Hi, want.Hi+5) {
+		t.Errorf("RHSRange.Hi = %.12g, want %.12g (reduced %.12g + 5)",
+			got.Hi, want.Hi+5, want.Hi)
+	}
+
+	// And the range must include the original RHS itself.
+	if got.Lo > 8 || got.Hi < 8 {
+		t.Errorf("RHSRange = [%.12g, %.12g] does not contain original RHS 8",
+			got.Lo, got.Hi)
 	}
 }
 
