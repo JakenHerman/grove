@@ -41,7 +41,7 @@ Target: **Q3.** Backwards-compatible additions only. Epic: [#24](https://github.
   next so models can flow in from MIPLIB benchmarks).
   - [x] [#1](https://github.com/JakenHerman/grove/issues/1) CPLEX LP
   - [x] [#2](https://github.com/JakenHerman/grove/issues/2) MPS
-- Range information for sensitivity: per-coefficient and per-RHS ranges
+- [x] Range information for sensitivity: per-coefficient and per-RHS ranges
   over which the current basis stays optimal (Bertsimas & Tsitsiklis §5.2).
   ([#3](https://github.com/JakenHerman/grove/issues/3))
 - Solution warm-starting: `Solver` interface gains `SolveWith(prob,

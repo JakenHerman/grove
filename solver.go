@@ -74,7 +74,13 @@ func (s *SimplexSolver) Solve(p *Problem) (*Result, error) {
 		}
 	}
 
-	res := &Result{values: map[*Var]float64{}, dual: map[*Constraint]float64{}, reduced: map[*Var]float64{}}
+	res := &Result{
+		values:       map[*Var]float64{},
+		dual:         map[*Constraint]float64{},
+		reduced:      map[*Var]float64{},
+		objCoefRange: map[*Var]ObjCoefRange{},
+		rhsRange:     map[*Constraint]RHSRange{},
+	}
 
 	// ---- Phase I: minimize sum of artificials -----------------------------
 	// Bertsimas & Tsitsiklis §3.5: introduce artificial variables a_i ≥ 0
@@ -201,6 +207,59 @@ func (s *SimplexSolver) Solve(p *Problem) (*Result, error) {
 			r = -r
 		}
 		res.reduced[uv] = r
+	}
+
+	// Ranging — Bertsimas & Tsitsiklis §5.2. We compute per-internal-column
+	// objective-coefficient ranges and per-internal-row RHS ranges in the
+	// standard form, then translate back to the user model. Ranges are
+	// reported in the user objective sense and the user RHS units.
+	internalObjRanges := std.objCoefRanges(c2, rc, tol)
+	internalRHSRanges := std.rhsRanges(tol)
+
+	for _, uv := range p.vars {
+		coef := p.objective[uv]
+		lo, hi := math.Inf(-1), math.Inf(1)
+		for _, sl := range std.slotsFor[uv] {
+			s := sl.sign
+			if std.maximized {
+				s = -s
+			}
+			ir := internalObjRanges[sl.col]
+			// Internal coefficient change Δ_int = s * Δ_user; intersect
+			// the per-slot constraint into the user-Δ window.
+			var sLo, sHi float64
+			if s >= 0 {
+				sLo, sHi = ir.Lo, ir.Hi
+			} else {
+				sLo, sHi = -ir.Hi, -ir.Lo
+			}
+			if sLo > lo {
+				lo = sLo
+			}
+			if sHi < hi {
+				hi = sHi
+			}
+		}
+		res.objCoefRange[uv] = ObjCoefRange{Lo: coef + lo, Hi: coef + hi}
+	}
+
+	for _, c := range p.constraints {
+		ri, ok := std.rowOf[c]
+		if !ok {
+			// Constraint did not reach the simplex (presolve will hand
+			// the original *Constraint back via its undo map; the
+			// half-line sentinel is correct for redundant rows).
+			res.rhsRange[c] = RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
+			continue
+		}
+		ir := internalRHSRanges[ri]
+		var lo, hi float64
+		if std.rowSign[ri] >= 0 {
+			lo, hi = ir.Lo, ir.Hi
+		} else {
+			lo, hi = -ir.Hi, -ir.Lo
+		}
+		res.rhsRange[c] = RHSRange{Lo: c.rhs + lo, Hi: c.rhs + hi}
 	}
 
 	if s.Verbose {
@@ -581,6 +640,113 @@ func (s *stdForm) reducedCosts(c, _ []float64) []float64 {
 		r[j] = cj - zj
 	}
 	return r
+}
+
+// internalRange is a [Lo, Hi] interval expressing how much an internal
+// coefficient (or RHS) can change while the current basis remains valid.
+// ±Inf encodes a half-line; rangeMath helpers in the SimplexSolver clip
+// these into the user model's domain.
+type internalRange struct {
+	Lo, Hi float64
+}
+
+// objCoefRanges computes, for each internal column j, the closed
+// interval [Δ_min, Δ_max] over which the cost c[j] can move while
+// keeping the basis dual-feasible (and therefore optimal — primal
+// feasibility is unaffected by objective changes). Bertsimas &
+// Tsitsiklis §5.2 ("Changes in the cost vector").
+//
+// For a basic column j (basic in row i*), every non-basic k must keep a
+// non-negative reduced cost: r_k - Δ * A_current[i*][k] ≥ 0. For a
+// non-basic column, only its own reduced cost is at stake: r_j + Δ ≥ 0.
+//
+// Artificials are reported as the (-Inf, +Inf) sentinel — their cost is
+// never user-visible.
+func (s *stdForm) objCoefRanges(c, rc []float64, tol float64) []internalRange {
+	out := make([]internalRange, s.n)
+	inBasis := make(map[int]int, s.m) // column → row
+	for i, b := range s.basis {
+		inBasis[b] = i
+	}
+	artSet := make(map[int]bool, len(s.artificials))
+	for _, j := range s.artificials {
+		artSet[j] = true
+	}
+	for j := 0; j < s.n; j++ {
+		if artSet[j] {
+			out[j] = internalRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
+			continue
+		}
+		if row, basic := inBasis[j]; basic {
+			dLo, dHi := math.Inf(-1), math.Inf(1)
+			for k := 0; k < s.n; k++ {
+				if _, isB := inBasis[k]; isB {
+					continue
+				}
+				if artSet[k] {
+					continue
+				}
+				if math.IsInf(c[k], 1) {
+					continue
+				}
+				a := s.A[row][k]
+				if math.Abs(a) <= tol {
+					continue
+				}
+				bound := rc[k] / a
+				if a > 0 {
+					if bound < dHi {
+						dHi = bound
+					}
+				} else {
+					if bound > dLo {
+						dLo = bound
+					}
+				}
+			}
+			out[j] = internalRange{Lo: dLo, Hi: dHi}
+			continue
+		}
+		// Non-basic. Reduced cost rc[j] is ≥ 0 at optimum (within tol);
+		// raising the cost only makes it more positive, lowering it by
+		// more than rc[j] makes it negative and triggers a re-pivot.
+		out[j] = internalRange{Lo: -rc[j], Hi: math.Inf(1)}
+	}
+	return out
+}
+
+// rhsRanges computes, for each row i, the closed interval [Δ_min, Δ_max]
+// over which the internal RHS b[i] can change while every basic variable
+// stays non-negative. Bertsimas & Tsitsiklis §5.2 ("Changes in the
+// requirement vector").
+//
+// The j-th basic variable's value moves to x_B[j] + Δ * (B^{-1} e_i)[j].
+// Because we kept the tableau in B^{-1}-form (A_current = B^{-1} A_orig),
+// (B^{-1} e_i)[j] is exactly A_current[j][origIdentityCol[i]].
+func (s *stdForm) rhsRanges(tol float64) []internalRange {
+	out := make([]internalRange, s.m)
+	for i := 0; i < s.m; i++ {
+		eiCol := s.origIdentityCol[i]
+		dLo, dHi := math.Inf(-1), math.Inf(1)
+		for k := 0; k < s.m; k++ {
+			a := s.A[k][eiCol]
+			if math.Abs(a) <= tol {
+				continue
+			}
+			bound := -s.b[k] / a
+			if a > 0 {
+				if bound > dLo {
+					dLo = bound
+				}
+			} else {
+				if bound < dHi {
+					dHi = bound
+				}
+			}
+		}
+		out[i] = internalRange{Lo: dLo, Hi: dHi}
+	}
+	return out
 }
 
 // basicCosts returns the cost-of-basics vector c_B with any "+∞" forbidden

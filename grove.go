@@ -621,6 +621,14 @@ type Result struct {
 	dual    map[*Constraint]float64 // shadow prices / dual values
 	reduced map[*Var]float64        // reduced costs of variables
 
+	// Ranging diagnostics (set when Status == Optimal). For variables and
+	// constraints that did not reach the simplex (e.g. presolve dropped
+	// them) the range is the half-open (-Inf, +Inf) sentinel — changing a
+	// fixed variable's coefficient or a redundant constraint's RHS does
+	// not affect the optimum.
+	objCoefRange map[*Var]ObjCoefRange
+	rhsRange     map[*Constraint]RHSRange
+
 	// Iterations is the number of simplex pivots performed across both
 	// phases.
 	Iterations int
@@ -678,6 +686,44 @@ func (r *Result) Reduced(v *Var) float64 {
 		return 0
 	}
 	return r.reduced[v]
+}
+
+// ObjCoefRange returns the closed interval of values to which v's
+// objective coefficient may move while the current optimal basis stays
+// optimal. The returned interval is reported in the user objective
+// sense. For a variable absent from the result map (or any non-Optimal
+// result) ObjCoefRange returns the (-Inf, +Inf) sentinel — the answer
+// for "unconstrained by the basis".
+//
+// See Bertsimas & Tsitsiklis, "Introduction to Linear Optimization",
+// §5.2 ("Local sensitivity analysis").
+func (r *Result) ObjCoefRange(v *Var) ObjCoefRange {
+	if r == nil {
+		return ObjCoefRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
+	}
+	if rr, ok := r.objCoefRange[v]; ok {
+		return rr
+	}
+	return ObjCoefRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
+}
+
+// RHSRange returns the closed interval of values to which c's
+// right-hand side may move while the current optimal basis stays
+// primal-feasible (and therefore optimal). The interval is in the
+// user-stated RHS units. For a constraint absent from the result map
+// (or any non-Optimal result) RHSRange returns the (-Inf, +Inf)
+// sentinel.
+//
+// See Bertsimas & Tsitsiklis, "Introduction to Linear Optimization",
+// §5.2 ("Local sensitivity analysis").
+func (r *Result) RHSRange(c *Constraint) RHSRange {
+	if r == nil {
+		return RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
+	}
+	if rr, ok := r.rhsRange[c]; ok {
+		return rr
+	}
+	return RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 }
 
 // Solve runs the configured solver. If [Problem.Solver] is nil the pure-Go
