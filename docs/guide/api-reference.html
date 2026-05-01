@@ -442,6 +442,14 @@
           <p>Reduced cost of <code>v</code>: per-unit objective change if <code>v</code> were forced into the basis. Zero on basic variables at a non-degenerate optimum.</p>
         </div>
         <div class="def">
+          <span class="sig">func (r *Result) ObjCoefRange(v *Var) ObjCoefRange</span>
+          <p>Closed interval of values <code>v</code>&rsquo;s objective coefficient may take while the current optimal basis remains optimal — the v0.2 ranging output of Bertsimas &amp; Tsitsiklis §5.2. Reported in the user objective sense; either endpoint may be <code>±Inf</code>. Returns the (-Inf, +Inf) sentinel for variables that didn&rsquo;t reach the simplex (e.g. presolved-fixed variables).</p>
+        </div>
+        <div class="def">
+          <span class="sig">func (r *Result) RHSRange(c *Constraint) RHSRange</span>
+          <p>Closed interval of values <code>c</code>&rsquo;s right-hand side may take while the current optimal basis stays primal-feasible (and optimal). Reported in the user RHS units; either endpoint may be <code>±Inf</code>. Returns the (-Inf, +Inf) sentinel for constraints dropped by presolve.</p>
+        </div>
+        <div class="def">
           <span class="sig">func (r *Result) NonIntegerIntegerVars(p *Problem) []*Var</span>
           <p>Integer/Binary variables whose optimum came back non-integer (within a <code>1e-6</code> tolerance). <code>nil</code> if the problem is all-continuous or the solve was not <code>Optimal</code>.</p>
         </div>
@@ -464,26 +472,40 @@
         <div class="def">
           <span class="sig">type ConstraintSensitivity struct {
   Constraint *Constraint
-  LHS        float64 // a·x at the optimum
-  Slack      float64 // LTE: b − a·x; GTE: a·x − b; EQ: 0
-  Dual       float64 // ∂z*/∂rhs
-  Binding    bool    // Slack ≈ 0
+  LHS        float64  // a·x at the optimum
+  Slack      float64  // LTE: b − a·x; GTE: a·x − b; EQ: 0
+  Dual       float64  // ∂z*/∂rhs
+  Binding    bool     // Slack ≈ 0
+  RHSRange   RHSRange // basis-stability interval for the RHS
 }</span>
-          <p>Per-constraint diagnostics block.</p>
+          <p>Per-constraint diagnostics block. <code>RHSRange</code> reports the closed interval of right-hand-side values over which the current basis stays primal-feasible (and the dual stays exact).</p>
         </div>
         <div class="def">
           <span class="sig">type VarSensitivity struct {
-  Var     *Var
-  Value   float64
-  Reduced float64
-  AtLower bool
-  AtUpper bool
+  Var          *Var
+  Value        float64
+  Reduced      float64
+  AtLower      bool
+  AtUpper      bool
+  ObjCoefRange ObjCoefRange // basis-stability interval for the obj coefficient
 }</span>
-          <p>Per-variable diagnostics block. <code>AtLower</code>/<code>AtUpper</code> indicate which bound the variable sits on, if any.</p>
+          <p>Per-variable diagnostics block. <code>AtLower</code>/<code>AtUpper</code> indicate which bound the variable sits on, if any. <code>ObjCoefRange</code> reports the closed interval of objective coefficients over which the current basis stays optimal.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type ObjCoefRange struct {
+  Lo, Hi float64
+}</span>
+          <p>Closed interval (in user objective sense) of values an objective coefficient can take while the current optimal basis stays optimal. Either endpoint may be <code>±Inf</code> for a half-line. Bertsimas &amp; Tsitsiklis §5.2.</p>
+        </div>
+        <div class="def">
+          <span class="sig">type RHSRange struct {
+  Lo, Hi float64
+}</span>
+          <p>Closed interval (in user RHS units) of values a constraint&rsquo;s right-hand side can take while the current optimal basis stays primal-feasible. Either endpoint may be <code>±Inf</code> for a half-line. Bertsimas &amp; Tsitsiklis §5.2.</p>
         </div>
         <div class="def">
           <span class="sig">func (s *Sensitivity) String() string</span>
-          <p>Pretty-printed report grouped into binding constraints, slack constraints, and variables.</p>
+          <p>Pretty-printed two-table report: one row per constraint (lhs, rhs, slack, dual, binding, rhs-lo, rhs-hi) and one row per variable (value, reduced, bound-status, coef-lo, coef-hi).</p>
         </div>
       </div>
 

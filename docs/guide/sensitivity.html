@@ -171,30 +171,38 @@ fmt.Println(rep)
 
       <p>
         It prints two tables — one row per constraint, one row per
-        variable — each with the primal values and the dual / reduced
-        cost numbers side by side:
+        variable — each with the primal values, the dual / reduced
+        cost numbers, and (since v0.2) the basis-stability range
+        for the constraint&rsquo;s RHS or the variable&rsquo;s
+        objective coefficient:
       </p>
 
 <pre><code>Constraints
-  name                       lhs        rhs        slack       dual    binding
-  day_min                   12.5 GTE       4        8.5          0    false
-  night_min                    2 GTE       2          0          1     true
-  budget                   18000 LTE   18000          0   0.000833     true
+  name                       lhs        rhs        slack       dual    binding     rhs-lo     rhs-hi
+  day_min                   12.5  &gt;=         4        8.5          0    false       -inf       12.5
+  night_min                    2  &gt;=         2          0      -0.25     true          0        8.8
+  budget                   18000  &lt;=     18000          0  0.0008333     true       7800       +inf
 Variables
-  name                        value     reduced    bound-status
-  day                          12.5          0     at lower
-  night                           2          0     at lower
+  name                        value     reduced    bound-status     coef-lo    coef-hi
+  day                          12.5          0    interior            0.8       +inf
+  night                           2          0    interior           -inf       1.25
 </code></pre>
 
       <p>
         The numbers depend on the model; the shape is always this.
+        Range columns marked <code>+inf</code> / <code>-inf</code> are
+        half-lines: the corresponding side is unbounded for the
+        current basis.
+      </p>
+
+      <p>
         If you want the data instead of the prose,
         <code>SensitivityReport</code> returns a
         <code>*Sensitivity</code> whose fields are flat slices:
       </p>
 
 <pre><code class="language-go">type Sensitivity struct {
-    Constraints []ConstraintSensitivity // one entry per constraint, with a Binding bool
+    Constraints []ConstraintSensitivity // one entry per constraint
     Variables   []VarSensitivity        // one entry per variable
 }
 </code></pre>
@@ -205,44 +213,112 @@ Variables
         dashboard shape you want.
       </p>
 
-      <h2>A worked example</h2>
+      <h2>Ranging</h2>
 
       <p>
-        Given the nurse model, say the CFO finds another $2,000 in
-        the couch cushions. Before grove was in the picture, you
-        would re-solve. You don&rsquo;t have to:
+        Duals and reduced costs answer the question
+        &ldquo;how does the optimum change for an
+        <em>infinitesimal</em> perturbation?&rdquo;. Ranging answers the
+        follow-on: &ldquo;over what interval is that linear answer
+        exact?&rdquo;. Outside the interval the optimal basis flips,
+        a different constraint binds, and the slope (dual or reduced
+        cost) takes a new value.
       </p>
 
-<pre><code class="language-go">extraBudget := 2000.0
-deltaZ      := res.Dual(budget) * extraBudget
-fmt.Printf("With +$%v of budget, z* increases by %.3f\n", extraBudget, deltaZ)
+      <p>
+        grove computes two ranging quantities at the optimum, one per
+        decision variable and one per constraint:
+      </p>
+
+      <ul>
+        <li><strong><code>ObjCoefRange</code></strong> — the closed interval of
+          values <code>v</code>&rsquo;s objective coefficient can take while
+          the current optimal basis stays optimal. Read it with
+          <code>res.ObjCoefRange(v)</code>.</li>
+        <li><strong><code>RHSRange</code></strong> — the closed interval of
+          values <code>c</code>&rsquo;s right-hand side can take while the
+          current optimal basis stays primal-feasible (and therefore
+          optimal — dual feasibility is unaffected by RHS changes).
+          Read it with <code>res.RHSRange(c)</code>.</li>
+      </ul>
+
+<pre><code class="language-go">rng := res.ObjCoefRange(day)
+fmt.Printf("day's coefficient can range over [%g, %g] before the basis changes\n",
+    rng.Lo, rng.Hi)
+
+rhs := res.RHSRange(budget)
+fmt.Printf("budget can range over [%g, %g]; outside that the dual jumps\n",
+    rhs.Lo, rhs.Hi)
 </code></pre>
 
       <p>
-        The caveat: this linearisation is only exact <em>within the
-        range where the current basis stays optimal</em>. If you
-        hand the CFO&rsquo;s grant into the model and re-solve, at
-        some point a different constraint starts binding and the
-        dual jumps. v0.1 doesn&rsquo;t report the basis-stability
-        range; that ships in v0.2 (see the
-        <a href="./roadmap.html">roadmap</a>). For small perturbations
-        the dual is correct.
+        Both endpoints are stated in the user objective sense and the
+        user RHS units (no internal sign flips to translate). Either
+        endpoint may be <code>±grove.Inf</code> to indicate a
+        half-line. Variables and constraints that did not survive
+        presolve report the (-Inf, +Inf) sentinel — a fixed
+        variable&rsquo;s coefficient does not influence the optimum,
+        and a redundant constraint&rsquo;s RHS only matters if it
+        leaves the half-space the dropped row was in.
+      </p>
+
+      <h3>Worked example</h3>
+
+      <p>
+        On the nurse-scheduling LP, the CFO offers another
+        <code>$2,000</code>. The dual of <code>budget</code> is
+        <code>1/1200 ≈ 0.000833</code>. Multiplying gives
+        <code>+$1.667</code> on the objective. But is the linear
+        approximation valid here?
+      </p>
+
+<pre><code class="language-go">extraBudget := 2000.0
+rhs         := res.RHSRange(budget)
+if 18000+extraBudget &gt; rhs.Hi {
+    fmt.Println("re-solve: ΔRHS exceeds the basis-stability range")
+} else {
+    fmt.Printf("safe: %v + %v stays inside [%g, %g]\n",
+        18000.0, extraBudget, rhs.Lo, rhs.Hi)
+}
+</code></pre>
+
+      <p>
+        For the example the basis-stability range on
+        <code>budget</code> is <code>[7800, +∞)</code>. Adding
+        <code>$2,000</code> stays inside, so the dual&rsquo;s
+        prediction is exact: <code>z* = 14.5 + 0.000833 · 2000 ≈
+        16.167</code>.
+      </p>
+
+      <p>
+        Mathematical background lives in Bertsimas &amp; Tsitsiklis,
+        <em>Introduction to Linear Optimization</em>, §5.2 (&ldquo;Local
+        sensitivity analysis&rdquo;). For a basic variable in row
+        <code>i</code>, raising its coefficient by Δ keeps the basis
+        optimal iff every non-basic reduced cost <code>r_k - Δ
+        · A_current[i][k] ≥ 0</code>; the smallest such Δ in each
+        direction is grove&rsquo;s <code>Hi</code>/<code>Lo</code>.
+        For an RHS perturbation along <code>e_i</code>, the basis stays
+        primal-feasible iff every basic value
+        <code>x_B[k] + Δ · (B⁻¹ e_i)[k] ≥ 0</code>.
       </p>
 
       <h2>What grove does not report (yet)</h2>
 
       <p>
-        Three things are on the roadmap but not in v0.1:
+        Two things are on the roadmap beyond v0.2:
       </p>
 
       <ul>
-        <li>Per-coefficient ranges over which the current basis stays optimal (sensitivity of the <em>objective</em> to the objective coefficient of each variable).</li>
-        <li>Per-RHS ranges over which each constraint&rsquo;s dual stays constant.</li>
         <li>Parametric sensitivity of duals to simultaneous RHS changes.</li>
+        <li>100% basis-aware ranging through presolve — fixed variables
+          and dropped redundant constraints currently report the
+          (-Inf, +Inf) sentinel rather than the exact width of their
+          per-row feasibility interval.</li>
       </ul>
 
       <p>
-        If you need any of the above today, the <code>WriteMPS</code>
+        For either of those, the <code>WriteMPS</code>
         exporter gives you a model you can pipe into a ranging-capable
         solver (GLPK&rsquo;s <code>glpsol --ranges</code>, or HiGHS).
       </p>

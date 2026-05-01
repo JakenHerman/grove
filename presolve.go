@@ -332,33 +332,64 @@ func (u *PresolveUndo) expand(res *Result) *Result {
 		return res
 	}
 	out := &Result{
-		Status:     res.Status,
-		Objective:  res.Objective,
-		Iterations: res.Iterations,
-		Message:    res.Message,
-		Warnings:   append([]string(nil), res.Warnings...),
-		values:     map[*Var]float64{},
-		dual:       map[*Constraint]float64{},
-		reduced:    map[*Var]float64{},
+		Status:       res.Status,
+		Objective:    res.Objective,
+		Iterations:   res.Iterations,
+		Message:      res.Message,
+		Warnings:     append([]string(nil), res.Warnings...),
+		values:       map[*Var]float64{},
+		dual:         map[*Constraint]float64{},
+		reduced:      map[*Var]float64{},
+		objCoefRange: map[*Var]ObjCoefRange{},
+		rhsRange:     map[*Constraint]RHSRange{},
 	}
 	// Variables settled by presolve.
+	unbounded := ObjCoefRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 	for v, val := range u.varValue {
 		out.values[v] = val
+		// A fixed variable's value doesn't react to its objective
+		// coefficient — the basis stays optimal for any cost.
+		out.objCoefRange[v] = unbounded
 	}
 	// Variables carried through from the reduced solve.
 	for rv, ov := range u.varMap {
 		out.values[ov] = res.values[rv]
 		out.reduced[ov] = res.reduced[rv]
+		out.objCoefRange[ov] = res.objCoefRange[rv]
 	}
-	// Constraints carried through from the reduced solve.
+	// Constraints carried through from the reduced solve. The reduced
+	// constraint's RHS is the original RHS minus Σ(k · fixed_val) for
+	// every fixed variable substituted out of the row, so the user-facing
+	// range — stated relative to the *original* RHS — picks up the same
+	// constant offset.
 	for rc, oc := range u.consMap {
 		out.dual[oc] = res.dual[rc]
+		shift := oc.rhs - rc.rhs
+		rrng := res.rhsRange[rc]
+		out.rhsRange[oc] = RHSRange{
+			Lo: shiftEndpoint(rrng.Lo, shift),
+			Hi: shiftEndpoint(rrng.Hi, shift),
+		}
 	}
-	// Dropped constraints: zero dual.
+	// Dropped constraints: zero dual, full-line "ranging not computed
+	// through presolve" sentinel. The presolve drop is exact only
+	// because 0 ⟂ rhs holds at the original RHS; reporting the
+	// per-direction feasibility width of an empty row is post-1.0 work.
+	rhsUnbounded := RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 	for _, oc := range u.droppedCons {
 		out.dual[oc] = 0
+		out.rhsRange[oc] = rhsUnbounded
 	}
 	return out
+}
+
+// shiftEndpoint adds a finite offset to a range endpoint, leaving ±Inf
+// fixed (Inf + finite is still Inf).
+func shiftEndpoint(x, shift float64) float64 {
+	if math.IsInf(x, 0) {
+		return x
+	}
+	return x + shift
 }
 
 // terminalResult synthesises a [Result] for the cases where Presolve
@@ -370,19 +401,25 @@ func (u *PresolveUndo) terminalResult() *Result {
 		return nil
 	}
 	res := &Result{
-		Status:  u.Terminal,
-		Message: u.TerminalMsg,
-		values:  map[*Var]float64{},
-		dual:    map[*Constraint]float64{},
-		reduced: map[*Var]float64{},
+		Status:       u.Terminal,
+		Message:      u.TerminalMsg,
+		values:       map[*Var]float64{},
+		dual:         map[*Constraint]float64{},
+		reduced:      map[*Var]float64{},
+		objCoefRange: map[*Var]ObjCoefRange{},
+		rhsRange:     map[*Constraint]RHSRange{},
 	}
 	// Variable values we know (populated on any terminal path).
+	unbounded := ObjCoefRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 	for v, val := range u.varValue {
 		res.values[v] = val
+		res.objCoefRange[v] = unbounded
 	}
 	// Dropped constraints have zero dual on every terminal path.
+	rhsUnbounded := RHSRange{Lo: math.Inf(-1), Hi: math.Inf(1)}
 	for _, oc := range u.droppedCons {
 		res.dual[oc] = 0
+		res.rhsRange[oc] = rhsUnbounded
 	}
 	if u.Terminal == Optimal && u.orig != nil {
 		// Compute the final objective from the original problem's
